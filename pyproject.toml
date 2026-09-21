@@ -32,7 +32,7 @@ dependencies = [
     "nd2==0.11.3",
     "pyimagej==1.8.0",
     "scyjava==1.12.5",
-    "jpype1==1.6.0",
+    "jpype1==1.7.1",
     "cellpose==4.2.1.1",
     "torch==2.13.0",
     "torchvision==0.28.0",
