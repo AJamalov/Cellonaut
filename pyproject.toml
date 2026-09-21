@@ -27,7 +27,7 @@ dependencies = [
     "scipy==1.13.1",
     "pillow==12.3.0",
     "defusedxml==0.7.1",
-    "matplotlib==3.9.2",
+    "matplotlib==3.11.2",
     "packaging==26.3",
     "nd2==0.11.3",
     "pyimagej==1.8.0",
