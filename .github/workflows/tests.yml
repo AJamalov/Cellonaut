@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-tests:
+    name: Windows quality and tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -e .
+          python -m pip install -r requirements-dev.txt
+
+      - name: Audit installed dependencies
+        run: python -m pip_audit --local --skip-editable --progress-spinner off
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Run Mypy
+        run: python -m mypy
+
+      - name: Run Pyright
+        run: python -m pyright
+
+      - name: Validate release documents
+        run: python -m cellonaut.release_checks.release_documents --project-root .
+
+      - name: Run test suite
+        run: python -m pytest --cov=cellonaut --cov-branch --cov-fail-under=70 --cov-report=term-missing

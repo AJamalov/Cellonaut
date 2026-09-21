@@ -1,0 +1,50 @@
+{
+  "reuse_existing_masks": false,
+  "panel_notes": {
+    "input_nd2": "",
+    "channels_masks": "",
+    "cellpose": "",
+    "processing": "",
+    "measurements": "",
+    "image_preview_tools": ""
+  },
+  "measurement_options": {
+        "area": true,
+        "mean": true,
+        "std_dev": false,
+        "mode": false,
+        "min_max": false,
+        "centroid": false,
+        "center_of_mass": false,
+        "perimeter": false,
+        "bounding_rect": false,
+        "fit_ellipse": false,
+        "feret": false,
+        "raw_intden": true,
+        "median": false,
+        "skewness": false,
+        "kurtosis": false,
+        "cell_area": false,
+        "cell_perimeter": false,
+        "cell_mean": false,
+        "cell_min_max": false,
+        "cell_median": false,
+        "cell_raw_intden": false,
+        "positive_area_in_cell": false,
+        "mean_in_positive_area": false,
+        "std_dev_in_positive_area": false,
+        "min_max_in_positive_area": false,
+        "median_in_positive_area": false,
+        "raw_intden_in_cell": false
+    },
+    "image_definitions": [
+        {
+            "name": "Channel 1",
+            "folder": "Channel 1",
+            "classifier": ""
+        }
+    ],
+    "input_dir": "",
+    "output_dir": "",
+    "mask_source_dir": ""
+}

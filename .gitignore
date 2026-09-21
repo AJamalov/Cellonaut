@@ -1,0 +1,86 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test, lint, and type-check caches
+.pytest_cache/
+pytest-of-*/
+pytest-cache-files-*/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.pyright/
+.pyre/
+.pytype/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+/mutants/
+/.*-pytest*/
+/.*_test_run_*/
+/.test-tmp-*/
+
+# Compiler and package-manager caches
+.cache/
+torchinductor_*/
+
+# Interrupted pip build/install temp folders
+pip-build-tracker-*/
+pip-install-*/
+pip-ephem-wheel-cache-*/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment and signing credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Build and installer outputs
+*.egg-info/
+/build/
+/dist/
+/installer_dist/
+/build_tools/
+/release_reports/
+*.spec.bak
+
+# Local app/runtime state
+/.local/
+/last_settings.json
+*.log
+
+# Analysis outputs generated during local runs
+/Results/
+/dry_run_sample_detection_report.txt
+/*_Cellonaut_output/
+/*_cell_count_output/
+/*_converted/
+*.nd2
+*.ome.tif
+*.ome.tiff
+*.czi
+*.lif
+
+# Editor and OS noise
+.vscode/
+.idea/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Native runtime crash reports
+*.dmp
+hs_err_pid*.log
+replay_pid*.log

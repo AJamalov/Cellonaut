@@ -1,0 +1,32 @@
+{
+  "type": "cellonaut_overlay_preview",
+  "data_policy": "lossless_source_channels",
+  "base_label": "Cellonaut",
+  "layer_labels": [
+    "Cellonaut",
+    "Cellonaut mask_Class1",
+    "Cellonaut mask_Class2",
+    "Cellonaut mask_Class3"
+  ],
+  "layer_colors": [
+    "#FFFFFF",
+    "#00FFFF",
+    "#FFFF00",
+    "#FFA500"
+  ],
+  "layer_roles": [
+    "image",
+    "weka_mask",
+    "weka_mask",
+    "weka_mask"
+  ],
+  "layer_keys": [
+    "image1",
+    "image2__class1",
+    "image2__class2",
+    "image2__class3"
+  ],
+  "dtype": "float32",
+  "compression": "none",
+  "mask_intensity_policy": "base_image_data_max"
+}

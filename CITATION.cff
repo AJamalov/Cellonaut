@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: Cellonaut
+message: "If you use Cellonaut in published work, please cite this software and the underlying tools used in your analysis."
+type: software
+authors:
+  - given-names: Adam
+    family-names: Jamalov
+version: 1.0.0
+repository-code: "https://github.com/AJamalov/Cellonaut"
+url: "https://github.com/AJamalov/Cellonaut"
+license: GPL-3.0-or-later
+abstract: "Microscopy image analysis with Fiji Trainable Weka Segmentation and Cellpose"
+keywords:
+  - Trainable Weka Segmentation
+  - Cellpose
+  - Fiji
+  - ImageJ
+  - image analysis
+  - microscopy
