@@ -37,6 +37,7 @@ from cellonaut.pipeline.planning import get_image_def
 from cellonaut.masks.roi_processing import create_mask_from_roi
 from cellonaut.masks.adjustments import adjust_label_image
 from cellonaut.system.gpu_detection import cellpose_acceleration_enabled
+from cellonaut.artifact_naming import portable_component
 
 
 WHOLE_CELL_MEASUREMENT_COLUMNS = {
@@ -46,7 +47,35 @@ WHOLE_CELL_MEASUREMENT_COLUMNS = {
     "cell_min_max": (("Min", "CellMin"), ("Max", "CellMax")),
     "cell_median": (("Median", "CellMedian"),),
     "cell_raw_intden": (("RawIntDen", "CellIntDen"),),
+    "cell_std_dev": (("StdDev", "CellStdDev"),),
+    "cell_mode": (("Mode", "CellMode"),),
+    "cell_centroid": (("CentroidX", "CellCentroidX"), ("CentroidY", "CellCentroidY")),
+    "cell_center_of_mass": (
+        ("CenterOfMassX", "CellCenterOfMassX"),
+        ("CenterOfMassY", "CellCenterOfMassY"),
+    ),
+    "cell_bounding_rect": (
+        ("BoundingRectX", "CellBoundingRectX"),
+        ("BoundingRectY", "CellBoundingRectY"),
+        ("BoundingRectWidth", "CellBoundingRectWidth"),
+        ("BoundingRectHeight", "CellBoundingRectHeight"),
+    ),
+    "cell_fit_ellipse": (
+        ("EllipseMajor", "CellEllipseMajor"),
+        ("EllipseMinor", "CellEllipseMinor"),
+        ("EllipseAngle", "CellEllipseAngle"),
+    ),
+    "cell_feret": (("Feret", "CellFeret"),),
+    "cell_circularity": (("Circularity", "CellCircularity"),),
+    "cell_solidity": (("Solidity", "CellSolidity"),),
+    "cell_skewness": (("Skewness", "CellSkewness"),),
+    "cell_kurtosis": (("Kurtosis", "CellKurtosis"),),
 }
+
+
+def _variant_label(cfg: Any, base_label: str) -> str:
+    variant = str(getattr(cfg, "output_variant", "") or "").strip()
+    return f"{base_label}_{portable_component(variant)}" if variant else base_label
 
 
 def selected_whole_cell_measurements(
@@ -55,7 +84,13 @@ def selected_whole_cell_measurements(
     measurement_options: Dict[str, bool],
 ) -> pd.DataFrame:
     """Measure the current channel inside each cell and retain selected columns."""
-    measured = make_per_cell_table(cell_labels, intensity_image)
+    requested_columns = {
+        source_column
+        for option_key, definitions in WHOLE_CELL_MEASUREMENT_COLUMNS.items()
+        if measurement_options.get(option_key, False)
+        for source_column, _output_column in definitions
+    }
+    measured = make_per_cell_table(cell_labels, intensity_image, include_columns=requested_columns)
     selected = pd.DataFrame({"CellID": measured["CellID"]})
     for option_key, definitions in WHOLE_CELL_MEASUREMENT_COLUMNS.items():
         if not measurement_options.get(option_key, False):
@@ -148,9 +183,17 @@ def _load_or_generate_cell_labels(
     log_func: Callable[[str], None],
     should_cancel: Optional[Callable[[], bool]],
     runtime: PipelineRuntime | None = None,
+    label_cache: Dict[str, np.ndarray] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, CellSegmentationConfig]:
-    labels = None
-    if getattr(cfg, "reuse_existing_masks", False):
+    # ``source_def`` is the reusable Cellpose-mask owner. Keep the historical
+    # parameter name for direct extension/test callers.
+    mask_def = source_def
+    cache_key = str(getattr(mask_def, "key", getattr(mask_def, "label", "")))
+    labels = label_cache.get(cache_key) if label_cache is not None else None
+    cached_labels = labels is not None
+    if cached_labels:
+        log_func(f"[{id_label}] Reused {mask_def.label}_Cellpose labels generated earlier for this sample")
+    if labels is None and getattr(cfg, "reuse_existing_masks", False):
         mask_source_dir = Path(getattr(cfg, "mask_source_dir", None) or cfg.output_dir)
         current_root = build_common_results_export_dirs(cfg.output_dir)["cell_segmentation_labels"]
         try:
@@ -160,13 +203,13 @@ def _load_or_generate_cell_labels(
         labels = load_existing_cellpose_labels(
             mask_source_dir,
             result_id,
-            source_def.label,
+            mask_def.label,
             log_func=log_func,
             relative_subdir=relative_subdir,
-            source_key=str(getattr(source_def, "key", source_def.label)),
+            source_key=str(getattr(mask_def, "key", mask_def.label)),
         )
         if labels is not None:
-            log_func(f"[{id_label}] Reused existing Cellpose labels for {source_def.label} from {mask_source_dir / 'Results'}")
+            log_func(f"[{id_label}] Reused existing Cellpose labels for {mask_def.label} from {mask_source_dir / 'Results'}")
             log_func(
                 f"[{id_label}] Cellpose model, diameter, probability threshold, flow threshold, minimum cell area, "
                 "and border-removal settings are not used to regenerate reused labels. "
@@ -174,11 +217,11 @@ def _load_or_generate_cell_labels(
             )
         else:
             log_func(
-                f"[{id_label}] Existing Cellpose labels not found for {source_def.label}; "
+                f"[{id_label}] Existing Cellpose labels not found for {mask_def.label}; "
                 "generating new labels with current settings."
             )
 
-    reused_labels = labels is not None
+    reused_labels = labels is not None and not cached_labels
     segmentation_cfg = build_cell_segmentation_cfg_from_pipeline(cfg)
     if labels is None:
         if cell_source_img is None:
@@ -203,15 +246,20 @@ def _load_or_generate_cell_labels(
     if reused_labels and any(int(value or 0) for value in adjustments.values()):
         log_func(f"[{id_label}] Reused final Cellpose labels retain their saved adjustments; current adjustments are not reapplied.")
     if not reused_labels and any(int(value or 0) for value in adjustments.values()):
-        labels = adjust_label_image(labels, **adjustments).astype(np.int32, copy=False)
-        log_func(f"[{id_label}] Applied persisted Cellpose mask adjustments: {adjustments}")
+        if not cached_labels:
+            labels = adjust_label_image(labels, **adjustments).astype(np.int32, copy=False)
+            log_func(f"[{id_label}] Applied persisted Cellpose mask adjustments: {adjustments}")
 
-    label_path = export_dirs["cell_segmentation_labels"] / f"{result_id}_{source_def.label}_01_cellpose_labels.tif"
-    outline_path = export_dirs["cell_segmentation_outlines"] / f"{result_id}_{source_def.label}_cellpose_outline.tif"
-    write_tiff(label_path, np.asarray(labels).astype(np.int32, copy=False))
-    write_tiff(outline_path, cell_label_outline_mask(labels))
-    for path, kind in ((label_path, "cell_labels"), (outline_path, "cell_outline")):
-        record_artifact(path, sample=result_id, target=str(getattr(source_def, "key", source_def.label)), label=source_def.label, kind=kind)
+    if label_cache is not None:
+        label_cache[cache_key] = labels
+
+    label_path = export_dirs["cell_segmentation_labels"] / f"{result_id}_{mask_def.label}_01_cellpose_labels.tif"
+    outline_path = export_dirs["cell_segmentation_outlines"] / f"{result_id}_{mask_def.label}_cellpose_outline.tif"
+    if not cached_labels:
+        write_tiff(label_path, np.asarray(labels).astype(np.int32, copy=False))
+        write_tiff(outline_path, cell_label_outline_mask(labels))
+        for path, kind in ((label_path, "cell_labels"), (outline_path, "cell_outline")):
+            record_artifact(path, sample=result_id, target=cache_key, label=mask_def.label, kind=kind)
     return labels, cell_source_arr, segmentation_cfg
 
 
@@ -249,9 +297,10 @@ def _measure_per_cell_roi_signals(
                 )
                 roi_mask_arr = imageplus_to_numpy_2d(roi_mask_imp) > 0
             corrected_arr = measurement_source_arr if has_source_background_subtraction else None
+            output_label = _variant_label(cfg, source_def.label)
             biology_csv = (
                 export_dirs["cell_signal_tables"]
-                / f"{result_id}_{source_def.label}_{roi_def.label}_per_cell_signal.csv"
+                / f"{result_id}_{output_label}_{roi_def.label}_per_cell_signal.csv"
             )
             biology_df, _geometry_df = export_per_cell_organelle_signal_tables(
                 cell_label_img=analysis_cell_mask,
@@ -264,7 +313,16 @@ def _measure_per_cell_roi_signals(
                 measurement_options=dict(getattr(cfg, "measurement_options", {}) or {}),
             )
             if save_detailed_tables:
-                record_artifact(biology_csv, sample=result_id, target=str(getattr(source_def, "key", source_def.label)), label=source_def.label, kind="cell_signal", mask=roi_def.key, mask_label=roi_def.label)
+                record_artifact(
+                    biology_csv,
+                    sample=result_id,
+                    target=str(getattr(source_def, "key", source_def.label)),
+                    label=source_def.label,
+                    kind="cell_signal",
+                    mask=roi_def.key,
+                    mask_label=roi_def.label,
+                    cell_mask=str(getattr(cfg, "cell_segmentation_mask_source", "") or ""),
+                )
             summary = summarize_per_cell_table(
                 biology_df,
                 roi_def.label,
@@ -300,6 +358,7 @@ def run_cell_segmentation_for_sample(
     log_func: Callable[[str], None],
     should_cancel: Optional[Callable[[], bool]] = None,
     runtime: PipelineRuntime | None = None,
+    label_cache: Dict[str, np.ndarray] | None = None,
 ) -> tuple[Dict[str, np.ndarray], str]:
     """Add original per-cell measurements to row and write segmentation artifacts.
 
@@ -319,8 +378,15 @@ def run_cell_segmentation_for_sample(
     check_cancel(should_cancel)
 
     cell_source_def = get_image_def(cfg, cfg.cell_segmentation_source)
+    cell_mask_def = get_image_def(
+        cfg,
+        getattr(cfg, "cell_segmentation_mask_source", "") or cfg.cell_segmentation_source,
+    )
+    cell_mask_key = str(getattr(cell_mask_def, "key", cell_mask_def.label))
+    labels_were_cached = label_cache is not None and cell_mask_key in label_cache
     cell_source_img = image_map.get(cell_source_def.key)
     cell_source_label = cell_source_def.label
+    cell_mask_label = cell_mask_def.label
     measurement_source_arr = imageplus_to_numpy_2d(measurement_source_img)
     source_measure_arr = imageplus_to_numpy_2d(source_measure_img)
 
@@ -328,13 +394,14 @@ def run_cell_segmentation_for_sample(
         cfg=cfg,
         cell_source_img=cell_source_img,
         cell_source_label=cell_source_label,
-        source_def=source_def,
+        source_def=cell_mask_def,
         export_dirs=export_dirs,
         result_id=result_id,
         id_label=id_label,
         log_func=log_func,
         should_cancel=should_cancel,
         runtime=runtime,
+        label_cache=label_cache,
     )
     extra_overlay_masks["__whole_cell_mask__"] = whole_cell_mask
 
@@ -354,6 +421,8 @@ def run_cell_segmentation_for_sample(
     # Pipeline tables are the immutable measured dataset. Cell groups and
     # exclusions are exploratory derivatives exported later from Image Preview Tools.
     total_cell_count = int(len(cell_table))
+    row["CellposeMaskKey"] = cell_mask_key
+    row["CellposeMaskLabel"] = cell_mask_label
     row[f"{source_def.label}_CellCount"] = total_cell_count
     export_source_table = cell_table.merge(measured_cell_table, on="CellID", how="left")
     export_table = append_cell_qc_summary_rows(
@@ -365,27 +434,44 @@ def run_cell_segmentation_for_sample(
         measured_cell_table,
         "",
         source_def.label,
-        cell_source_label,
+        cell_mask_label,
     )
     row.update(whole_cell_summary)
     analysis_cell_mask = whole_cell_mask
 
-    diagnostics = export_cell_segmentation_diagnostics(
-        label_img=whole_cell_mask,
-        base_img=cell_source_arr,
-        qc_png_dir=export_dirs["cell_segmentation_qc_pngs"],
-        table_dir=export_dirs["cell_segmentation_tables"],
-        base_name=f"{result_id}_{source_def.label}",
-        cfg=cell_segmentation_cfg,
+    diagnostics = (
+        {}
+        if labels_were_cached
+        else export_cell_segmentation_diagnostics(
+            label_img=whole_cell_mask,
+            base_img=cell_source_arr,
+            qc_png_dir=export_dirs["cell_segmentation_qc_pngs"],
+            table_dir=export_dirs["cell_segmentation_tables"],
+            base_name=f"{result_id}_{cell_mask_def.label}",
+            cfg=cell_segmentation_cfg,
+        )
     )
 
-    export_table_path = (
-        export_dirs["cell_segmentation_tables"] / f"{result_id}_{source_def.label}_cell_measurements.csv"
-    )
+    output_label = _variant_label(cfg, source_def.label)
+    export_table_path = export_dirs["cell_segmentation_tables"] / f"{result_id}_{output_label}_cell_measurements.csv"
     write_dataframe_csv(drop_derived_ratio_columns(export_table), export_table_path, index=False)
-    record_artifact(export_table_path, sample=result_id, target=str(getattr(source_def, "key", source_def.label)), label=source_def.label, kind="cell_table")
+    record_artifact(
+        export_table_path,
+        sample=result_id,
+        target=str(getattr(source_def, "key", source_def.label)),
+        label=source_def.label,
+        kind="cell_table",
+        cell_mask=str(getattr(cell_mask_def, "key", cell_mask_def.label)),
+    )
     if diagnostics and diagnostics.get("qc_overlay"):
-        record_artifact(Path(diagnostics["qc_overlay"]), sample=result_id, target=str(getattr(source_def, "key", source_def.label)), label=source_def.label, kind="cell_png")
+        record_artifact(
+            Path(diagnostics["qc_overlay"]),
+            sample=result_id,
+            target=cell_mask_key,
+            label=cell_mask_def.label,
+            kind="cell_png",
+            cell_mask=cell_mask_key,
+        )
 
     _measure_per_cell_roi_signals(
         cfg=cfg,
@@ -397,7 +483,8 @@ def run_cell_segmentation_for_sample(
         measurement_source_arr=measurement_source_arr,
         source_measure_arr=source_measure_arr,
         source_def=source_def,
-        cell_source_label=cell_source_label,
+        # This established parameter supplies the summary's Cellpose-mask name.
+        cell_source_label=cell_mask_label,
         has_source_background_subtraction=has_source_background_subtraction,
         export_dirs=export_dirs,
         result_id=result_id,

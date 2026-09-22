@@ -25,6 +25,11 @@ from cellonaut.masks.roi_rasterization import imagej_roi_to_mask_image
 from cellonaut.pipeline.roi_defs import make_class_roi_def, parse_class_roi_key
 
 
+def _artifact_file_id(cfg: Any, result_id: str) -> str:
+    variant = str(getattr(cfg, "output_variant", "") or "").strip()
+    return f"{result_id}_{portable_component(variant)}" if variant else result_id
+
+
 # Look up class-specific masks through their parent image definition.
 def _get_image_def(cfg: Any, key: str):
     class_info = parse_class_roi_key(key)
@@ -346,14 +351,25 @@ def _save_lossless_overlay_stack(
         used_colors_hex.append(color_hex)
 
         safe_mask = _safe_layer_name(label_name)
-        binary_path = binary_out_path / f"{result_id}_{safe_mask}_binary.tif"
+        binary_path = binary_out_path / f"{_artifact_file_id(cfg, result_id)}_{safe_mask}_binary.tif"
         write_tiff(
             binary_path,
             np.multiply(mask_arr.astype(np.uint8), np.uint8(255)),
             photometric="minisblack",
         )
 
-        record_artifact(binary_path, sample=result_id, target=str(key), label=label_name, kind="binary_mask")
+        record_artifact(
+            binary_path,
+            sample=result_id,
+            target=str(key),
+            label=label_name,
+            kind="binary_mask",
+            cell_mask=(
+                str(getattr(cfg, "cell_segmentation_mask_source", "") or "")
+                if key in {"__whole_cell_mask__", "__flagged_cell_mask__"}
+                else ""
+            ),
+        )
 
     if not write_overlay:
         log_func(f"[{result_id}] Saved final binary masks; review overlay export is disabled")
@@ -362,7 +378,8 @@ def _save_lossless_overlay_stack(
     stack_arr = np.stack(stack_layers, axis=0)
 
     safe_base = _safe_layer_name(base_label)
-    out_file = out_path / f"{result_id}_{safe_base}_combined_overlay.tif"
+    file_id = _artifact_file_id(cfg, result_id)
+    out_file = out_path / f"{file_id}_{safe_base}_combined_overlay.tif"
     write_fiji_channel_stack(out_file, stack_arr, used_labels, used_colors_hex)
 
     sidecar = {
@@ -379,11 +396,19 @@ def _save_lossless_overlay_stack(
     }
     sidecar_dir = _sidecar_dir_for_media_dir(out_path)
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    sidecar_path = sidecar_dir / f"{result_id}_{safe_base}_combined_overlay.json"
+    sidecar_path = sidecar_dir / f"{file_id}_{safe_base}_combined_overlay.json"
     write_text(sidecar_path, json.dumps(sidecar, indent=2), encoding="utf-8")
     target_key = str(getattr(cfg, "source_image_key", "") or next((image.key for image in cfg.images if image.label == base_label), base_label))
     target_def = _get_image_def(cfg, target_key)
-    record_artifact(out_file, sample=result_id, target=target_key, label=str(getattr(target_def, "label", base_label)), kind="combined_overlay", sidecar=sidecar_path)
+    record_artifact(
+        out_file,
+        sample=result_id,
+        target=target_key,
+        label=str(getattr(target_def, "label", base_label)),
+        kind="combined_overlay",
+        sidecar=sidecar_path,
+        cell_mask=str(getattr(cfg, "cell_segmentation_mask_source", "") or ""),
+    )
 
     log_func(f"[{result_id}] Saved overlay stack: {out_file.name}")
 
@@ -504,7 +529,7 @@ def save_general_flat_qc_overlay(
                         overlay.add(roi_poly)
 
                 if key == "__whole_cell_mask__":
-                    legend_items.append("Whole cell mask")
+                    legend_items.append("Cellpose whole-cell mask")
                 elif key == "__flagged_cell_mask__":
                     legend_items.append("Flagged out-of-range cells")
                 else:
@@ -544,13 +569,20 @@ def save_general_flat_qc_overlay(
         flattened = IJ.getImage()
 
         safe_base = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in base_label)
-        out_file = out_path / f"{result_id}_{safe_base}_qc.png"
+        out_file = out_path / f"{_artifact_file_id(cfg, result_id)}_{safe_base}_qc.png"
         if not save_imagej_png(out_file, flattened, FileSaver):
             raise OSError(f"Could not save flat review overlay: {out_file}")
 
         target_key = str(getattr(cfg, "source_image_key", "") or next((image.key for image in cfg.images if image.label == base_label), base_label))
         target_def = _get_image_def(cfg, target_key)
-        record_artifact(out_file, sample=result_id, target=target_key, label=str(getattr(target_def, "label", base_label)), kind="overlay_png")
+        record_artifact(
+            out_file,
+            sample=result_id,
+            target=target_key,
+            label=str(getattr(target_def, "label", base_label)),
+            kind="overlay_png",
+            cell_mask=str(getattr(cfg, "cell_segmentation_mask_source", "") or ""),
+        )
         log_func(f"[{result_id}] Saved generalized flat review overlay: {out_file.name}")
 
     finally:

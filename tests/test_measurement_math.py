@@ -115,6 +115,64 @@ def test_summarize_per_cell_table_includes_new_base_measurements():
     assert summary[f"{mask_prefix}_MeanOfMaskMedians"] == 7
 
 
+def test_summarize_per_cell_table_includes_extended_cellpose_measurements():
+    df = pd.DataFrame(
+        {
+            "CellStdDev": [1, 3],
+            "CellMode": [2, 4],
+            "CellCentroidX": [10, 20],
+            "CellCentroidY": [30, 40],
+            "CellCenterOfMassX": [11, 21],
+            "CellCenterOfMassY": [31, 41],
+            "CellBoundingRectX": [8, 18],
+            "CellBoundingRectY": [28, 38],
+            "CellBoundingRectWidth": [4, 6],
+            "CellBoundingRectHeight": [5, 7],
+            "CellEllipseMajor": [6, 8],
+            "CellEllipseMinor": [3, 5],
+            "CellEllipseAngle": [20, 40],
+            "CellFeret": [7, 9],
+            "CellCircularity": [0.7, 0.9],
+            "CellSolidity": [0.8, 1.0],
+            "CellSkewness": [-1, 1],
+            "CellKurtosis": [2, 4],
+        }
+    )
+
+    summary = summarize_per_cell_table(df, "", "GFP", "DIA")
+    prefix = "GFP_measured_with_DIA_cellpose_mask_PerCell"
+
+    assert summary == pytest.approx({
+        f"{prefix}_MeanOfCellStdDevs": 2.0,
+        f"{prefix}_MeanOfCellModes": 3.0,
+        f"{prefix}_MeanCellCentroidX": 15.0,
+        f"{prefix}_MeanCellCentroidY": 35.0,
+        f"{prefix}_MeanCellCenterOfMassX": 16.0,
+        f"{prefix}_MeanCellCenterOfMassY": 36.0,
+        f"{prefix}_MeanCellBoundingRectX": 13.0,
+        f"{prefix}_MeanCellBoundingRectY": 33.0,
+        f"{prefix}_MeanCellBoundingRectWidth": 5.0,
+        f"{prefix}_MeanCellBoundingRectHeight": 6.0,
+        f"{prefix}_MeanCellEllipseMajor": 7.0,
+        f"{prefix}_MeanCellEllipseMinor": 4.0,
+        f"{prefix}_MeanCellEllipseAngle": 30.0,
+        f"{prefix}_MeanCellFeretDiameter": 8.0,
+        f"{prefix}_MeanCellCircularity": 0.8,
+        f"{prefix}_MeanCellSolidity": 0.9,
+        f"{prefix}_MeanCellSkewness": 0.0,
+        f"{prefix}_MeanCellKurtosis": 3.0,
+    })
+
+
+def test_summarize_per_cell_table_uses_axial_mean_for_ellipse_angles():
+    df = pd.DataFrame({"CellEllipseAngle": [1.0, 179.0]})
+
+    summary = summarize_per_cell_table(df, "", "GFP", "DIA")
+
+    key = "GFP_measured_with_DIA_cellpose_mask_PerCell_MeanCellEllipseAngle"
+    assert summary[key] == pytest.approx(0.0, abs=1e-12)
+
+
 def test_summarize_per_cell_table_omits_all_missing_numeric_results():
     df = pd.DataFrame(
         {

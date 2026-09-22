@@ -143,6 +143,10 @@ def test_measurement_units_cover_geometry_intensity_and_ratios():
     assert measurement_unit("Mask_AreaFraction") == "ratio"
     assert measurement_unit("Mask_Skewness") == "unitless"
     assert measurement_unit("Mask_Kurtosis") == "unitless"
+    assert measurement_unit("CellCenterOfMassX") == "px"
+    assert measurement_unit("CellEllipseAngle") == "degrees"
+    assert measurement_unit("CellCircularity") == "unitless"
+    assert measurement_unit("CellStdDev") == "a.u."
 
 
 def test_derived_ratios_are_omitted_from_measurement_exports():
@@ -151,11 +155,22 @@ def test_derived_ratios_are_omitted_from_measurement_exports():
         "MaskArea_InCell": [5],
         "MaskAreaFraction_InCell": [0.5],
         "Circularity": [0.8],
+        "Signal_in_Mask_Circularity": [0.75],
+        "MaskCircularity_InCell": [0.7],
+        "CellCircularity": [0.8],
+        "CellSolidity": [0.9],
         "MaskIntDenPerCellArea": [10],
         "Mask_to_RestOfCell_MeanRatio": [2],
     })
 
-    assert list(drop_derived_ratio_columns(table).columns) == ["CellID", "MaskArea_InCell"]
+    assert list(drop_derived_ratio_columns(table).columns) == [
+        "CellID",
+        "MaskArea_InCell",
+        "Signal_in_Mask_Circularity",
+        "MaskCircularity_InCell",
+        "CellCircularity",
+        "CellSolidity",
+    ]
 
 
 def test_human_readable_skeleton_junction_column():
@@ -169,6 +184,21 @@ def test_human_readable_names_cover_fiji_measurements():
     assert human_readable_column_name("GFP_in_Mask_BoundingRectWidth") == "GFP(Mask) : Bounding rectangle width (px)"
     assert human_readable_column_name("GFP_in_Mask_FeretAngle") == "GFP(Mask) : Feret angle (degrees)"
     assert human_readable_column_name("GFP_in_Mask_AreaFraction") == "GFP(Mask) : Area fraction (ratio)"
+
+
+def test_human_readable_names_identify_cellpose_whole_cell_measurements():
+    assert human_readable_column_name("CellStdDev") == (
+        "Cellpose whole-cell intensity standard deviation (a.u.)"
+    )
+    assert human_readable_column_name("CellEllipseAngle") == (
+        "Cellpose whole-cell fitted ellipse angle (degrees)"
+    )
+    assert human_readable_column_name("CellFeret") == (
+        "Cellpose whole-cell maximum Feret diameter (px)"
+    )
+    assert human_readable_column_name(
+        "GFP_measured_with_DIA_cellpose_mask_PerCell_MeanCellCircularity"
+    ) == "GFP(DIA Cellpose cells) : mean cell circularity (unitless)"
 
 
 @pytest.mark.parametrize(

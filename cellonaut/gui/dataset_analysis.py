@@ -5,12 +5,20 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from cellonaut.results.artifacts import artifact_root
+from cellonaut.results.artifacts import ArtifactResolver, artifact_root, image_definition
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QMessageBox, QWidget
 
-from cellonaut.config.defaults import MEASUREMENT_LABELS, MEASUREMENT_METADATA, QC_FILTER_MODE_LABELS, MASK_INTENSITY_SOURCE_LABELS
+from cellonaut.config.defaults import (
+    CELLPOSE_MEASUREMENT_KEYS,
+    CONFIGURED_MASK_MEASUREMENT_KEYS,
+    CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS,
+    MASK_INTENSITY_SOURCE_LABELS,
+    MEASUREMENT_LABELS,
+    MEASUREMENT_METADATA,
+    QC_FILTER_MODE_LABELS,
+)
 from cellonaut.gui.mixin import GuiMixin
 from cellonaut.io.writers import write_dataframe_csv
 from cellonaut.measurement.table_cleanup import drop_derived_ratio_columns
@@ -20,27 +28,9 @@ from cellonaut.pipeline.run_outputs import next_numbered_child
 
 
 MEASUREMENT_GROUP_KEYS = (
-    (
-        "analysis_basic_measurement_checks_layout",
-        (
-            "area", "mean", "std_dev", "mode", "min_max", "centroid", "center_of_mass", "perimeter",
-            "bounding_rect", "fit_ellipse", "feret", "raw_intden", "median", "skewness",
-            "kurtosis",
-        ),
-    ),
-    (
-        "analysis_whole_cell_measurement_checks_layout",
-        (
-            "cell_area", "cell_perimeter", "cell_mean", "cell_min_max", "cell_median", "cell_raw_intden",
-        ),
-    ),
-    (
-        "analysis_cell_measurement_checks_layout",
-        (
-            "positive_area_in_cell", "mean_in_positive_area", "std_dev_in_positive_area",
-            "min_max_in_positive_area", "median_in_positive_area", "raw_intden_in_cell",
-        ),
-    ),
+    ("analysis_basic_measurement_checks_layout", CONFIGURED_MASK_MEASUREMENT_KEYS),
+    ("analysis_whole_cell_measurement_checks_layout", CELLPOSE_MEASUREMENT_KEYS),
+    ("analysis_cell_measurement_checks_layout", CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS),
 )
 
 FILTER_DISPLAY = {
@@ -306,7 +296,27 @@ class CellonautGuiDatasetAnalysisMixin(GuiMixin):
             or image_def.get("name", "")
             or f"Image {row_idx + 1}"
         )
-        cell_source_label = str(image_def.get("analysis_cell_segmentation_source", source_label) or source_label)
+        selected_cellpose = str(image_def.get("analysis_cellpose_mask_source", "") or "").strip()
+        active_definitions = self.get_active_image_definitions()
+        try:
+            resolver = ArtifactResolver.load(Path(self.preview_state.file_path or ""))
+            if resolver is not None:
+                record = resolver.record(Path(self.preview_state.file_path or ""))
+                mask_definition = image_definition(
+                    {"target": record.get("cell_mask", ""), "label": ""}, active_definitions
+                )
+                selected_cellpose = str((mask_definition or {}).get("name", "") or selected_cellpose).strip()
+        except Exception:
+            pass
+        definitions_by_name = {
+            str(item.get("name", "") or "").strip(): item for item in active_definitions
+        }
+        cellpose_provider = definitions_by_name.get(selected_cellpose, {})
+        cell_source_label = str(
+            cellpose_provider.get("analysis_cell_segmentation_source", selected_cellpose or source_label)
+            or selected_cellpose
+            or source_label
+        )
         selected_masks = [
             name
             for name, checked in dict(image_def.get("mask_relationships", {}) or {}).items()
@@ -341,7 +351,7 @@ class CellonautGuiDatasetAnalysisMixin(GuiMixin):
             target_name = "Target mask" if not selected_mask_label else selected_mask_label
             self.analysis_mask_filter_host.setTitle(f"{target_name} within cell")
         self.update_inline_filter_category_visibility(
-            bool(image_def.get("analysis_cell_segmentation_enabled", False)),
+            bool(selected_cellpose),
             bool(selected_mask_label),
         )
         return source_label, cell_source_label, selected_mask_label
@@ -391,7 +401,9 @@ class CellonautGuiDatasetAnalysisMixin(GuiMixin):
             self.add_inline_measurement_group(layout_name, list(keys), options)
         self.analysis_measurements_title.setText("Measurement settings")
         self.analysis_measurements_hint.setText(
-            "These choices apply to every measured channel. Cell measurements require Cellpose; mask-inside-cell measurements also require an assigned mask."
+            "These choices apply to every measured channel. Cellpose whole-cell measurements require a selected "
+            "Cellpose mask; measurements of configured masks within Cellpose cells also require an assigned Weka or "
+            "combined mask."
         )
     def _populate_inline_filter_settings(self, image_def, row_idx, active_defs) -> None:
         if hasattr(self, "update_preview_tools_source_options"):

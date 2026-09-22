@@ -88,11 +88,11 @@ ERROR_HINTS = [
     ),
     UserErrorHint(
         SetupErrorCode.WHOLE_CELL_OVERLAY,
-        "Whole-cell overlay cannot be shown.",
+        "Cellpose whole-cell overlay cannot be shown.",
         "Cell masks are disabled for this measured channel.",
         (
-            "Enable Cellpose masks for the measured channel.",
-            "Remove the whole-cell mask overlay from the measurement setup.",
+            "Configure a reusable Cellpose mask and select its column for the measured channel.",
+            "Remove the Cellpose whole-cell mask overlay from the measurement setup.",
             "Run Preview One Sample to confirm the overlay.",
         ),
     ),

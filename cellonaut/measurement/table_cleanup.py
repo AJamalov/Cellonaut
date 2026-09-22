@@ -9,16 +9,24 @@ import pandas as pd
 
 
 _DERIVED_RATIO_COLUMN = re.compile(
-    r"(?:Circularity|Solidity|Roundness|AspectRatio|AreaFraction(?:_InCell)?|"
+    r"(?:Roundness|AspectRatio|AreaFraction(?:_InCell)?|"
     r"PositiveAreaFractionInCell|FractionOfCell(?:Corrected)?IntDen|"
     r"(?:Corrected)?IntDenPerCellArea|(?:Corrected)?MeanRatio|"
     r"(?:Corrected)?IntDenRatio)$"
 )
 
+_INTERNAL_SHAPE_COLUMNS = {"Circularity", "Solidity"}
 
 def drop_derived_ratio_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep ratio metrics available to filters without writing them as measurements."""
-    return df.drop(columns=[column for column in df.columns if _DERIVED_RATIO_COLUMN.search(str(column))])
+    """Keep internal filter metrics without duplicating them in measurement exports."""
+    return df.drop(
+        columns=[
+            column
+            for column in df.columns
+            if str(column) in _INTERNAL_SHAPE_COLUMNS
+            or _DERIVED_RATIO_COLUMN.search(str(column))
+        ]
+    )
 
 
 # Remove empty export noise while retaining identifier columns required to understand the table.

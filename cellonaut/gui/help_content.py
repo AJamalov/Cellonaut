@@ -6,6 +6,7 @@ from html import escape
 from typing import Any, Iterable
 
 from cellonaut.config.defaults import (
+    CONFIGURED_MASK_MEASUREMENT_KEYS,
     IMAGE_PROCESSING_STEP_DEFINITIONS,
     MASK_PROCESSING_STEP_DEFINITIONS,
     MEASUREMENT_METADATA,
@@ -60,7 +61,8 @@ def _definition_items(definitions: Iterable[dict[str, Any]], guidance: dict[str,
 
 def _measurement_items() -> str:
     items = []
-    for metadata in MEASUREMENT_METADATA.values():
+    for key in CONFIGURED_MASK_MEASUREMENT_KEYS:
+        metadata = MEASUREMENT_METADATA[key]
         label = str(metadata["label"])
         unit = str(metadata.get("unit", ""))
         unit_text = f" ({escape(unit)})" if unit else ""
@@ -152,11 +154,13 @@ HELP_PAGES = [
         GFP inside it.</p>
         <p>Check the channels under Setup. In <b>Masks</b>, select the source image and choose <b>Add mask</b>.
         Use a trained Weka <code>.model</code>, or select <b>Combined masks</b> to build a mask from existing masks.
-        Then turn ON the channel/mask pairs you want in <b>Measurements</b>.</p>
+        Then turn ON the channel/mask pairs you want in <b>Measurements</b>. Each enabled Cellpose channel creates a
+        reusable <code>&lt;Channel&gt;_Cellpose</code> column, which can be selected for several measured channels.</p>
         <p>Combined masks support <b>OR</b> (all selected areas), <b>AND</b> (shared areas), and <b>XOR</b>
         (areas covered by an odd number of masks). A combined mask can also be used to build another combined mask.</p>
         <p>A Weka mask measures its selected regions together, even if they are disconnected. To identify and measure
-        individual cells separately, enable <b>Cellpose</b> for the measured channel; it does not require a Weka mask.</p>
+        individual cells separately, enable <b>Cellpose</b> on one suitable cell-shape channel and select its mask for
+        every signal channel that shows the same cells. Cellpose does not require a Weka mask.</p>
         """,
     ),
     (
@@ -288,20 +292,30 @@ HELP_PAGES = [
     (
         "Measurements",
         f"""
-        <p>In the measurement matrix, <b>rows are image channels to measure</b> and <b>columns are masks</b>.
-        Turn ON an intersection to measure that channel inside that mask. Enable Cellpose for a channel to measure
-        separately identified cells; you can use both routes together.</p>
-        <p><b>Measurement settings</b> controls which metrics are included. Necessary result tables and review overlays are saved automatically.
-        Cell-and-mask measurements require Cellpose
-        on the measured channel and an assigned measurement mask because they describe a mask region inside each cell.</p>
+        <p>In the measurement matrix, <b>rows are image channels to measure</b> and <b>columns are configured masks
+        plus reusable Cellpose masks</b>. A Cellpose mask enabled on Channel1 appears as
+        <code>Channel1_Cellpose</code>. Select that column for every signal channel showing the same cells; Cellonaut
+        generates the labels once per sample and reuses them. You can also select any number of Cellpose-mask columns
+        for one measured row; each channel/mask combination receives separate measurements and result files.</p>
+        <p><b>Measurement settings</b> has three groups. <b>Configured-mask measurements</b> measure the
+        selected channel once inside each assigned Weka or combined mask. <b>Cellpose whole-cell measurements</b>
+        measure every Cellpose label separately. <b>Configured mask within Cellpose cells</b> measures each
+        assigned Weka or combined mask where it overlaps every Cellpose cell. Necessary result tables and review
+        overlays are saved automatically.</p>
+        <p>All three groups offer the same measurement names, units, and ordering: Area, Mean gray value,
+        Standard deviation, Modal gray value, Min &amp; max gray value, Centroid, Center of mass, Perimeter,
+        Bounding rectangle, Fit ellipse, Feret's diameter, Circularity, Solidity, Integrated density, Median,
+        Skewness, and Kurtosis. The group heading identifies which pixels those terms describe.</p>
         <p>Lengths and areas remain in pixels and pixels squared, even when the image contains physical calibration.
         <b>Integrated density</b> is the sum of pixel intensities in the region (ImageJ's RawIntDen).</p>
         <p>Saved results include a table per measured channel, a combined dataset table, detailed cell tables,
         and a review overlay. Derived fractions and ratios are left to analysis after export.</p>
-        <p>Mask-inside-cell standard deviation uses the sample formula (dividing by pixel count minus one)
-        and is blank for fewer than two pixels. Whole-mask statistics use Fiji's measurement implementation.
-        Skewness describes intensity-distribution asymmetry; kurtosis describes its tail weight.
-        Use the recorded Fiji version when reproducing these statistics.</p>
+        <p>Configured-mask-within-Cellpose-cell and Cellpose whole-cell standard deviations use the sample formula
+        (dividing by pixel count minus one) and are blank for fewer than two pixels. Configured-mask statistics
+        use Fiji's measurement implementation. Cellpose whole-cell values use native NumPy/scikit-image
+        equivalents so Cellpose-only runs do not require Fiji. Whole-cell mode uses the lowest value when
+        frequencies tie; kurtosis is bias-corrected excess kurtosis. Shape estimators can differ slightly from Fiji.
+        Use the recorded software versions when reproducing these statistics.</p>
         <h3>Measurement reference</h3>
         <ul>{MEASUREMENT_ITEMS}</ul>
         <h3>Verify measurements manually in Fiji</h3>
@@ -338,7 +352,7 @@ HELP_PAGES = [
             Compare RawIntDen with the corresponding background-corrected result. Start each radius
             from the same pre-subtraction image; do not subtract successive radii from one another.</li>
         </ol>
-        <p>For mask-inside-cell measurements, make a ROI for one Cellpose label as described in <b>Cellpose</b>,
+        <p>For measurements of configured masks within Cellpose cells, make a ROI for one Cellpose label as described in <b>Cellpose</b>,
         then intersect it with the mask ROI using ROI Manager's <b>More &gt; AND</b>. Measure that intersection
         on the measured channel. An empty mask-cell intersection has area and integrated density 0; intensity
         statistics are blank because there are no pixels to describe.</p>
@@ -372,7 +386,7 @@ HELP_PAGES = [
         condition in its category; Match either category can still match through the other category.</p>
         <p>For fraction conditions, <code>25%</code> and <code>0.25</code> mean the same thing.
         Include the percent sign: <code>25</code> means twenty-five, not 25 percent.</p>
-        <p>Choose <b>Target mask for cell groups</b> when target-mask conditions use a mask. Whole-cell intensity
+        <p>Choose <b>Target mask for cell groups</b> when target-mask conditions use a mask. Cellpose whole-cell intensity
         uses the Cellpose source channel; <b>Measure target intensity from</b> selects the target-mask intensity
         source. <b>Exclude this group from CSV files</b> affects filtered exports, not original measurements.</p>
         <p>Use <b>Export filtered CSV for this sample</b> or <b>Export filtered CSV for all samples in the pipeline</b>.

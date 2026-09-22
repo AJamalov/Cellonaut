@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
+from typing import Any
 
 from cellonaut.exceptions import SetupError, SetupErrorCode, SetupFileNotFoundError
 from cellonaut.artifact_naming import portable_component
@@ -169,22 +170,52 @@ def validate_config(cfg: Config) -> None:
     if not enabled_targets:
         raise ValueError("At least one measured channel must be enabled")
 
-    seen_target_sources: set[str] = set()
+    preliminary_identities: set[tuple[str, str]] = set()
+    for target in enabled_targets:
+        identity = (target.source_image_key, target.cell_segmentation_mask_source)
+        if identity in preliminary_identities:
+            raise ValueError(
+                "Measured channel and Cellpose mask combination is enabled more than once: "
+                f"{target.source_image_key} / {target.cell_segmentation_mask_source or '(none)'}"
+            )
+        preliminary_identities.add(identity)
+
+    source_counts: dict[str, int] = {}
+    for target in enabled_targets:
+        source_counts[target.source_image_key] = source_counts.get(target.source_image_key, 0) + 1
+    variants_by_source: dict[str, set[str]] = {}
+    for target in enabled_targets:
+        if source_counts[target.source_image_key] <= 1:
+            continue
+        if not target.output_variant:
+            mask_key = target.cell_segmentation_mask_source or target.source_image_key
+            target.output_variant = f"{mask_key}_Cellpose"
+        normalized_variant = target.output_variant.casefold()
+        existing_variants = variants_by_source.setdefault(target.source_image_key, set())
+        if normalized_variant in existing_variants:
+            raise ValueError(
+                f"Measured channel {target.source_image_key} has duplicate output variant: {target.output_variant}"
+            )
+        existing_variants.add(normalized_variant)
+
+    cellpose_mask_settings: dict[str, tuple[Any, ...]] = {}
     for target in enabled_targets:
         if target.source_image_key not in keys:
             raise SetupError(SetupErrorCode.MEASURED_CHANNEL, "Measured channel must reference a configured channel")
-        if target.source_image_key in seen_target_sources:
-            raise ValueError(f"Measured channel is enabled more than once: {target.source_image_key}")
-        seen_target_sources.add(target.source_image_key)
         if target.overlay_base_image_key and target.overlay_base_image_key not in keys:
             raise SetupError(SetupErrorCode.OVERLAY_BASE, "Overlay base must reference a configured channel")
         for key in target.overlay_roi_keys:
             if key not in allowed_overlay_extra_keys and key not in roi_keys:
                 raise SetupError(SetupErrorCode.OVERLAY_MASK, f"Overlay mask must reference a configured mask: {key}")
         if target.overlay_whole_cell_mask and not target.do_cell_segmentation:
-            raise SetupError(SetupErrorCode.WHOLE_CELL_OVERLAY, "Whole cell mask overlay requires whole-cell segmentation to be enabled.")
+            raise SetupError(
+                SetupErrorCode.WHOLE_CELL_OVERLAY,
+                "Cellpose whole-cell mask overlay requires Cellpose segmentation to be enabled.",
+            )
         if target.cell_segmentation_source and target.cell_segmentation_source not in keys:
             raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose source channel must reference a configured channel")
+        if target.cell_segmentation_mask_source and target.cell_segmentation_mask_source not in keys:
+            raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose mask must reference a configured channel")
         if target.per_cell_mask_source and target.per_cell_mask_source not in roi_keys:
             raise SetupError(SetupErrorCode.PER_CELL_MASK, "Per-cell mask source must reference a configured mask")
         if target.do_cell_segmentation:
@@ -192,6 +223,24 @@ def validate_config(cfg: Config) -> None:
                 target.cell_diameter,
                 target.cell_min_size,
             )
+            mask_key = target.cell_segmentation_mask_source or target.source_image_key
+            settings_signature = (
+                target.cell_segmentation_source,
+                target.cell_diameter,
+                target.cell_min_size,
+                target.cell_use_gpu,
+                target.cellprob_threshold,
+                target.flow_threshold,
+                target.cell_remove_border,
+                target.cellpose_model_type,
+                target.cellpose_custom_model_path,
+                tuple(sorted((target.cell_mask_adjustments or {}).items())),
+            )
+            previous_settings = cellpose_mask_settings.setdefault(mask_key, settings_signature)
+            if previous_settings != settings_signature:
+                raise ValueError(
+                    f"Reusable Cellpose mask {mask_key} has conflicting segmentation settings across measured channels"
+                )
 
     _validate_fiji_path_if_needed(cfg, enabled_targets)
     cfg.measurement_targets = list(resolved_targets)

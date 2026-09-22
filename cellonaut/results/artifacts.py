@@ -75,7 +75,7 @@ def _artifact_records(manifest: dict[str, Any]) -> list[dict[str, Any]] | None:
         seen.add(name.casefold())
         if "sidecar" in item:
             _relative_path(item["sidecar"])
-        for key in ("label", "mask", "mask_label", "classifier"):
+        for key in ("label", "mask", "mask_label", "classifier", "cell_mask"):
             if key in item and not isinstance(item[key], str):
                 raise ArtifactMetadataError(f"Invalid artifact {key}: {item[key]!r}")
         required = {
@@ -136,10 +136,19 @@ class ArtifactResolver:
         ]
 
     def related(self, record: dict[str, Any], kind: str) -> dict[str, Any]:
-        matches = self.matching(sample=record["sample"], target=record["target"], kind=kind)
+        related_target = (
+            str(record.get("cell_mask", "") or record["target"])
+            if kind in {"cell_labels", "cell_outline"}
+            else record["target"]
+        )
+        matches = self.matching(sample=record["sample"], target=related_target, kind=kind)
+        cell_mask = str(record.get("cell_mask", "") or "")
+        if cell_mask and kind not in {"cell_labels", "cell_outline"}:
+            exact = [item for item in matches if str(item.get("cell_mask", "") or "") == cell_mask]
+            matches = exact or [item for item in matches if not str(item.get("cell_mask", "") or "")]
         if len(matches) != 1:
             raise ArtifactMetadataError(
-                f"Expected one {kind} for {record['sample']} / {record['target']}; found {len(matches)}."
+                f"Expected one {kind} for {record['sample']} / {related_target}; found {len(matches)}."
             )
         self.path(matches[0])
         return matches[0]
@@ -147,12 +156,19 @@ class ArtifactResolver:
     def signal(
         self, record: dict[str, Any], mask_label: str, image_defs: list[dict[str, Any]]
     ) -> dict[str, Any] | None:
-        matches = []
+        exact_matches = []
+        legacy_matches = []
+        record_cell_mask = str(record.get("cell_mask", "") or "")
         for signal in self.matching(sample=record["sample"], target=record["target"], kind="cell_signal"):
             definition = image_definition({"target": signal["mask"], "label": signal["mask_label"]}, image_defs)
             current_label = definition.get("name") if definition is not None else signal["mask_label"]
             if current_label == mask_label:
-                matches.append(signal)
+                signal_cell_mask = str(signal.get("cell_mask", "") or "")
+                if signal_cell_mask == record_cell_mask:
+                    exact_matches.append(signal)
+                elif not signal_cell_mask:
+                    legacy_matches.append(signal)
+        matches = exact_matches or legacy_matches
         if len(matches) > 1:
             raise ArtifactMetadataError(f"Multiple signal tables recorded for mask {mask_label}.")
         return matches[0] if matches else None
@@ -191,6 +207,7 @@ def record_artifact(
     mask: str = "",
     mask_label: str = "",
     classifier: str = "",
+    cell_mask: str = "",
 ) -> None:
     """Atomically register an already-written file using run-local sample/target keys.
 
@@ -213,6 +230,8 @@ def record_artifact(
         item["mask"] = mask
     if mask_label:
         item["mask_label"] = mask_label
+    if cell_mask:
+        item["cell_mask"] = cell_mask
     if sidecar is not None:
         item["sidecar"] = sidecar.relative_to(root).as_posix()
     for existing in files:

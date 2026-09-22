@@ -2,14 +2,14 @@
 
 Cellonaut is distributed under `GPL-3.0-or-later`. Each binary release at
 https://github.com/AJamalov/Cellonaut/releases must include the matching
-`Cellonaut-1.0.0-corresponding-sources.zip` archive.
+`Cellonaut-1.0.1-corresponding-sources.zip` archive.
 
 The archive contains the exact Cellonaut source and pinned sources for the
 redistributed Qt/PySide, Fiji, Bio-Formats, Trainable Weka Segmentation,
 `fastremap`, and `fill-voids` components. Its `MANIFEST.json` records every
 origin, byte size, and SHA-256 digest.
 
-Build it from the clean `v1.0.0` tag with:
+Build it from the clean `v1.0.1` tag with:
 
 ```text
 python -m cellonaut.release_checks.corresponding_sources prepare --output installer_dist

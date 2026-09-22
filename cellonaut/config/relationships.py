@@ -8,6 +8,20 @@ from typing import Any
 from cellonaut.config.defaults import MASK_SOURCE_MODE_COMBINED
 
 
+def cellpose_mask_source_names(image_def: dict[str, Any]) -> list[str]:
+    """Return all selected reusable Cellpose masks, including legacy presets."""
+    raw = image_def.get("analysis_cellpose_mask_sources", [])
+    sources = (
+        [str(value).strip() for value in raw if str(value or "").strip()]
+        if isinstance(raw, (list, tuple))
+        else []
+    )
+    legacy = str(image_def.get("analysis_cellpose_mask_source", "") or "").strip()
+    if not sources and legacy:
+        sources = [legacy]
+    return list(dict.fromkeys(sources))
+
+
 # Relationship tables use display names as keys, so even an unfinished channel
 # needs a stable fallback name rather than an empty string.
 def image_display_name(image_def: dict[str, Any], index: int) -> str:
@@ -18,6 +32,59 @@ def image_display_name(image_def: dict[str, Any], index: int) -> str:
 # keys consistent across rebuilding, saving, and validation.
 def image_display_names(image_defs: list[dict[str, Any]]) -> list[str]:
     return [image_display_name(image_def, index) for index, image_def in enumerate(image_defs)]
+
+
+def cellpose_provider_definition(
+    image_def: dict[str, Any],
+    image_defs: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the channel definition that owns a measured row's Cellpose mask."""
+    sources = cellpose_mask_source_names(image_def)
+    provider_name = sources[0] if sources else ""
+    if not provider_name:
+        return None
+    names = image_display_names(image_defs)
+    return next(
+        (
+            candidate
+            for name, candidate in zip(names, image_defs)
+            if name == provider_name and not bool(candidate.get("is_mask_only", False))
+        ),
+        None,
+    )
+
+
+def cellpose_intensity_source_name(
+    image_def: dict[str, Any],
+    image_defs: list[dict[str, Any]],
+    cellpose_mask_name: str = "",
+) -> str:
+    """Resolve the image channel used to generate a measured row's selected Cellpose mask."""
+    selected = str(cellpose_mask_name or "").strip()
+    provider = (
+        next(
+            (
+                candidate
+                for name, candidate in zip(image_display_names(image_defs), image_defs)
+                if name == selected and not bool(candidate.get("is_mask_only", False))
+            ),
+            None,
+        )
+        if selected
+        else cellpose_provider_definition(image_def, image_defs)
+    )
+    if provider is None:
+        return str(
+            image_def.get("analysis_cell_segmentation_source", "")
+            or image_def.get("name", "")
+            or ""
+        ).strip()
+    return str(
+        provider.get("analysis_cell_segmentation_source", "")
+        or provider.get("name", "")
+        or image_def.get("name", "")
+        or ""
+    ).strip()
 
 
 # Whitespace-only paths are treated as unconfigured because they cannot produce
@@ -115,6 +182,14 @@ def remap_analysis_references(
             image_def.get("analysis_cell_segmentation_source", ""),
             own_name,
         )
+        remapped_cellpose_sources = [
+            remap_name(source, "") for source in cellpose_mask_source_names(image_def)
+        ]
+        remapped_cellpose_sources = list(dict.fromkeys(source for source in remapped_cellpose_sources if source))
+        image_def["analysis_cellpose_mask_sources"] = remapped_cellpose_sources
+        image_def["analysis_cellpose_mask_source"] = (
+            remapped_cellpose_sources[0] if remapped_cellpose_sources else ""
+        )
         image_def["cell_group_mask_source"] = remap_name(
             image_def.get("cell_group_mask_source", ""),
             "",
@@ -168,6 +243,12 @@ def normalize_analysis_relationships(image_defs: list[dict[str, Any]]) -> list[d
     ]
     valid_channel_name_set = set(valid_channel_names)
     available_mask_names = configured_mask_names(updated_defs)
+    enabled_cellpose_names = {
+        names[index]
+        for index, image_def in enumerate(updated_defs)
+        if names[index] in valid_channel_name_set
+        and bool(image_def.get("analysis_cell_segmentation_enabled", False))
+    }
 
     for index, image_def in enumerate(updated_defs):
         own_name = names[index]
@@ -184,6 +265,12 @@ def normalize_analysis_relationships(image_defs: list[dict[str, Any]]) -> list[d
         cell_source = str(image_def.get("analysis_cell_segmentation_source", "") or "").strip()
         if cell_source not in valid_channel_name_set:
             image_def["analysis_cell_segmentation_source"] = own_name
+
+        selected_cellpose = [
+            source for source in cellpose_mask_source_names(image_def) if source in enabled_cellpose_names
+        ]
+        image_def["analysis_cellpose_mask_sources"] = selected_cellpose
+        image_def["analysis_cellpose_mask_source"] = selected_cellpose[0] if selected_cellpose else ""
 
         relationships_in = dict(image_def.get("mask_relationships", {}) or {})
         relationships = {

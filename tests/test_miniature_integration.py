@@ -17,6 +17,7 @@ from cellonaut.masks.cell_qc import evaluate_cell_qc_table, make_mask_qc_metric_
 from cellonaut.pipeline.discovery import STRUCTURE_FLAT_TIFFS
 from cellonaut.pipeline.models import Config, ImageDef, MeasurementTarget
 from cellonaut.pipeline.runner import run_pipeline
+from cellonaut.results.artifacts import ArtifactResolver
 
 
 def _miniature_config(dataset: dict[str, Any]) -> Config:
@@ -92,6 +93,13 @@ def test_miniature_native_pipeline_writes_real_tables_status_and_manifest(miniat
 def test_miniature_pipeline_exports_numeric_cell_measurements(miniature_tiff_dataset, monkeypatch):
     dataset = miniature_tiff_dataset
     cfg = _miniature_config(dataset)
+    cfg.measurement_options.update(
+        {
+            "cell_std_dev": True,
+            "cell_centroid": True,
+            "cell_circularity": True,
+        }
+    )
     cfg.cell_use_gpu = False
     cfg.cell_min_size = 0
     cfg.cell_remove_border = False
@@ -116,6 +124,106 @@ def test_miniature_pipeline_exports_numeric_cell_measurements(miniature_tiff_dat
     assert cells["Area"].tolist() == [9.0, 6.0]
     assert cells["RawIntDen"].tolist() == [22.0, 52.0]
     assert cells["Mean"].tolist() == pytest.approx([22 / 9, 52 / 6])
+    assert bool(np.isfinite(np.asarray(cells["CellStdDev"], dtype=float)).all())
+    assert bool(
+        np.isfinite(np.asarray(cells[["CellCentroidX", "CellCentroidY"]], dtype=float)).all()
+    )
+    assert bool(np.isfinite(np.asarray(cells["CellCircularity"], dtype=float)).all())
+
+    summary = pd.read_csv(cfg.output_dir / "Results" / "CSV Data" / "Measurements.csv")
+    assert "Signal(Signal Cellpose cells) : mean cell intensity standard deviation (a.u.)" in summary
+    assert "Signal(Signal Cellpose cells) : mean cell centroid X (px)" in summary
+    assert "Signal(Signal Cellpose cells) : mean cell circularity (unitless)" in summary
+
+
+def test_shared_cellpose_mask_runs_inference_once_for_multiple_channels(miniature_tiff_dataset, monkeypatch):
+    dataset = miniature_tiff_dataset
+    cfg = _miniature_config(dataset)
+    cfg.cell_use_gpu = False
+    cfg.cell_min_size = 0
+    cfg.cell_remove_border = False
+    cfg.measurement_targets = [
+        MeasurementTarget(
+            source_image_key=source_key,
+            do_cell_segmentation=True,
+            cell_segmentation_source="signal",
+            cell_segmentation_mask_source="signal",
+            cell_min_size=0,
+            cell_remove_border=False,
+        )
+        for source_key in ("signal", "reference")
+    ]
+    calls = []
+
+    def segment_fixture(image, _settings, **_kwargs):
+        calls.append(np.asarray(image).copy())
+        return tifffile.imread(dataset["cell_labels_path"])
+
+    monkeypatch.setattr("cellonaut.masks.cellpose.run_cell_segmentation_on_image", segment_fixture)
+    result = run_pipeline(cfg)
+
+    assert result["status"] == "completed"
+    assert len(calls) == 1
+    np.testing.assert_array_equal(calls[0], dataset["signal"])
+    cells_dir = cfg.output_dir / "Results" / "CSV Data" / "Cell Measurements"
+    assert (cells_dir / "miniature_sample.ome_Signal_cell_measurements.csv").is_file()
+    assert (cells_dir / "miniature_sample.ome_Reference_cell_measurements.csv").is_file()
+    labels_dir = cfg.output_dir / "Results" / "Cells" / "TIFF Labels"
+    assert (labels_dir / "miniature_sample.ome_Signal_01_cellpose_labels.tif").is_file()
+    assert not (labels_dir / "miniature_sample.ome_Reference_01_cellpose_labels.tif").exists()
+    resolver = ArtifactResolver.load(cfg.output_dir / "Results")
+    assert resolver is not None
+    reference_table = resolver.matching(target="reference", kind="cell_table")[0]
+    assert resolver.related(reference_table, "cell_labels")["target"] == "signal"
+
+
+def test_one_measured_channel_can_use_multiple_cellpose_masks_without_output_collisions(
+    miniature_tiff_dataset, monkeypatch
+):
+    dataset = miniature_tiff_dataset
+    cfg = _miniature_config(dataset)
+    cfg.cell_use_gpu = False
+    cfg.cell_min_size = 0
+    cfg.cell_remove_border = False
+    cfg.measurement_targets = [
+        MeasurementTarget(
+            source_image_key="reference",
+            do_cell_segmentation=True,
+            cell_segmentation_source=mask_key,
+            cell_segmentation_mask_source=mask_key,
+            output_variant=f"{mask_label}_Cellpose",
+            overlay_whole_cell_mask=True,
+            cell_min_size=0,
+            cell_remove_border=False,
+        )
+        for mask_key, mask_label in (("signal", "Signal"), ("reference", "Reference"))
+    ]
+    calls: list[np.ndarray] = []
+
+    def segment_fixture(image, _settings, **_kwargs):
+        calls.append(np.asarray(image).copy())
+        return tifffile.imread(dataset["cell_labels_path"])
+
+    monkeypatch.setattr("cellonaut.masks.cellpose.run_cell_segmentation_on_image", segment_fixture)
+    result = run_pipeline(cfg)
+
+    assert result["status"] == "completed"
+    assert len(calls) == 2
+    summary = pd.read_csv(cfg.output_dir / "Results" / "CSV Data" / "Measurements.csv")
+    assert summary["Cellpose mask"].tolist() == ["Reference", "Signal"]
+    cells_dir = cfg.output_dir / "Results" / "CSV Data" / "Cell Measurements"
+    assert (cells_dir / "miniature_sample.ome_Reference_Signal_Cellpose_cell_measurements.csv").is_file()
+    assert (cells_dir / "miniature_sample.ome_Reference_Reference_Cellpose_cell_measurements.csv").is_file()
+    resolver = ArtifactResolver.load(cfg.output_dir / "Results")
+    assert resolver is not None
+    tables = resolver.matching(target="reference", kind="cell_table")
+    assert {record["cell_mask"] for record in tables} == {"signal", "reference"}
+    assert {
+        resolver.related(record, "combined_overlay")["cell_mask"] for record in tables
+    } == {"signal", "reference"}
+    assert {
+        resolver.related(record, "cell_labels")["target"] for record in tables
+    } == {"signal", "reference"}
 
 
 def test_miniature_mask_files_produce_exact_qc_metrics_and_flags(miniature_tiff_dataset):

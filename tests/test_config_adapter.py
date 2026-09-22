@@ -7,6 +7,9 @@ import pytest
 
 from cellonaut.config.adapter import build_pipeline_config_from_gui_state, parse_cell_qc_limits_text
 from cellonaut.config.defaults import (
+    CELLPOSE_MEASUREMENT_KEYS,
+    CONFIGURED_MASK_MEASUREMENT_KEYS,
+    CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS,
     DEFAULT_CELL_DIAMETER,
     CELLPOSE_MODEL_OPTIONS,
     DEFAULT_CELLPOSE_MODEL_TYPE,
@@ -95,6 +98,22 @@ def test_default_measurements_match_minimal_fiji_selection():
     assert "cell_area" in options
     assert "std_dev_in_positive_area" in options
     assert set(options) == set(MEASUREMENT_METADATA)
+
+
+def test_measurement_categories_share_terms_units_and_order():
+    groups = (
+        CONFIGURED_MASK_MEASUREMENT_KEYS,
+        CELLPOSE_MEASUREMENT_KEYS,
+        CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS,
+    )
+
+    assert {len(keys) for keys in groups} == {17}
+    for configured_key, cellpose_key, within_cell_key in zip(*groups):
+        configured = MEASUREMENT_METADATA[configured_key]
+        assert MEASUREMENT_METADATA[cellpose_key]["label"] == configured["label"]
+        assert MEASUREMENT_METADATA[cellpose_key]["unit"] == configured["unit"]
+        assert MEASUREMENT_METADATA[within_cell_key]["label"] == configured["label"]
+        assert MEASUREMENT_METADATA[within_cell_key]["unit"] == configured["unit"]
 
 
 def test_default_cellpose_settings_match_cellpose_api_defaults():

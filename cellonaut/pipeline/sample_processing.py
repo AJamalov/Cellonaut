@@ -220,6 +220,7 @@ def process_sample(
             log_func=log_func,
             should_cancel=should_cancel,
             runtime=precomputed_context.runtime,
+            label_cache=precomputed_context.cellpose_label_cache,
         )
         if cfg.do_cell_segmentation and "__whole_cell_mask__" in extra_overlay_masks:
             try:
@@ -231,6 +232,8 @@ def process_sample(
                     extra_overlay_masks=extra_overlay_masks,
                     export_dir=export_dirs["processing_montages"],
                     result_id=result_id,
+                    output_variant=str(getattr(cfg, "output_variant", "") or ""),
+                    cell_mask_key=str(getattr(cfg, "cell_segmentation_mask_source", "") or ""),
                     log_func=log_func,
                 )
             except Exception as exc:
@@ -286,6 +289,9 @@ def process_measurement_target_for_sample(
     if status == "PROCESSED":
         target_label = get_image_def(cfg, target.source_image_key).label
         target_suffix = str(target_label or target.source_image_key)
+        output_variant = str(getattr(target, "output_variant", "") or "").strip()
+        if output_variant:
+            target_suffix = f"{target_suffix}__{output_variant}"
 
         if row is not None:
             original_label = str(row.get("Label", ""))

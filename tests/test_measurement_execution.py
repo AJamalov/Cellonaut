@@ -112,6 +112,34 @@ def test_background_subtracted_measurement_is_auto_written(monkeypatch):
     assert row["Signal_in_Mask_Area"] == 4.0
 
 
+def test_configured_mask_circularity_and_solidity_are_selectable(monkeypatch):
+    monkeypatch.setattr(
+        execution,
+        "measure_roi_stats",
+        lambda *_args: {"Circularity": 0.75, "Solidity": 0.9},
+    )
+    row = {}
+
+    execution.measure_rois_for_source(
+        cfg=SimpleNamespace(
+            measurement_options={"circularity": True, "solidity": True}
+        ),
+        roi_defs=[SimpleNamespace(key="mask", label="Mask")],
+        roi_map={"mask": object()},
+        row=row,
+        source_def=SimpleNamespace(key="signal", label="Signal"),
+        source_measure_img="raw",
+        measurement_source_img="raw",
+        has_source_background_subtraction=False,
+        corrected_suffix="RB40p0",
+        id_label="sample",
+        log_func=lambda _message: None,
+    )
+
+    assert row["Signal_in_Mask_Circularity"] == 0.75
+    assert row["Signal_in_Mask_Solidity"] == 0.9
+
+
 @pytest.mark.parametrize("outcome", ["success", "measurement_error", "cancel"])
 def test_background_sweep_disposes_owned_images(imagej_measurement_backend, outcome):
     backend = imagej_measurement_backend

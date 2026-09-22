@@ -16,6 +16,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from cellonaut.runtime import PipelineStage, stage_update
 from cellonaut.config.defaults import (
+    CELLPOSE_MEASUREMENT_KEYS,
+    CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS,
     DEFAULT_CELL_DIAMETER,
     DEFAULT_CELL_MIN_SIZE,
     DEFAULT_CELLPROB_THRESHOLD,
@@ -25,7 +27,11 @@ from cellonaut.config.defaults import (
     MASK_INTENSITY_SOURCE_LABELS,
     normalize_qc_filter_mode,
 )
-from cellonaut.config.relationships import image_produces_mask, image_uses_non_classifier_mask
+from cellonaut.config.relationships import (
+    cellpose_mask_source_names,
+    image_produces_mask,
+    image_uses_non_classifier_mask,
+)
 from cellonaut.gui.dialogs import ConfigurationSummaryDialog, count_label
 from cellonaut.gui.field_validation import CellonautGuiFieldValidationMixin
 from cellonaut.gui.setup_checks import (
@@ -293,14 +299,6 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
     # These checks are advisory because Cellpose can provide the measurement
     # boundary without a separate Weka, imported, or combined mask.
     def get_analysis_matrix_warnings(self) -> list[str]:
-        whole_cell_keys = (
-            "cell_area", "cell_perimeter", "cell_mean", "cell_min_max", "cell_median", "cell_raw_intden",
-        )
-        mask_in_cell_keys = (
-            "positive_area_in_cell", "mean_in_positive_area", "std_dev_in_positive_area",
-            "min_max_in_positive_area", "median_in_positive_area", "raw_intden_in_cell",
-        )
-
         active_defs = self.get_active_image_definitions()
         by_name = {
             str(img.get("name", "") or "").strip(): img for img in active_defs if str(img.get("name", "") or "").strip()
@@ -310,11 +308,11 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
         measurement_options = dict(self.measurement_options or {})
         wants_whole_cell = any(
             bool(measurement_options.get(key, False))
-            for key in whole_cell_keys
+            for key in CELLPOSE_MEASUREMENT_KEYS
         )
         wants_mask_in_cell = any(
             bool(measurement_options.get(key, False))
-            for key in mask_in_cell_keys
+            for key in CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS
         )
 
         for source_def in active_defs:
@@ -346,17 +344,31 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
                         "Choose the .model file again, or enable Reuse existing masks if masks already exist."
                     )
 
-            if (wants_whole_cell or wants_mask_in_cell) and not bool(
+            selected_cellpose = cellpose_mask_source_names(source_def)
+            if not selected_cellpose and "analysis_cellpose_mask_source" not in source_def and bool(
                 source_def.get("analysis_cell_segmentation_enabled", False)
             ):
+                selected_cellpose = [source_name]
+            if (wants_whole_cell or wants_mask_in_cell) and not selected_cellpose:
+                if wants_whole_cell and wants_mask_in_cell:
+                    selected_description = (
+                        "Cellpose whole-cell measurements and measurements of configured masks within "
+                        "Cellpose cells are selected"
+                    )
+                elif wants_whole_cell:
+                    selected_description = "Cellpose whole-cell measurements are selected"
+                else:
+                    selected_description = (
+                        "Measurements of configured masks within Cellpose cells are selected"
+                    )
                 warnings.append(
-                    f"{source_name}: per-cell measurements are selected but Cellpose masks are disabled. "
-                    "Enable Cellpose for this channel or turn off the per-cell measurement options."
+                    f"{source_name}: {selected_description} but Cellpose masks are disabled. "
+                    "Turn ON a Cellpose-mask column for this channel or turn off the Cellpose measurement options."
                 )
-            elif wants_mask_in_cell and not selected_targets:
+            if wants_mask_in_cell and not selected_targets:
                 warnings.append(
-                    f"{source_name}: mask-inside-cell measurements are selected but no measurement mask is assigned. "
-                    "Turn ON a channel/mask pair or turn off the mask-inside-cell options."
+                    f"{source_name}: measurements of configured masks within Cellpose cells are selected but no Weka or combined "
+                    "mask is assigned. Turn ON a channel/mask pair or turn off those measurement options."
                 )
 
             populations = list(source_def.get("cell_populations", []) or [])
@@ -367,10 +379,10 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
                 for group in populations
                 if isinstance(group, dict)
             )
-            if has_groups and not bool(source_def.get("analysis_cell_segmentation_enabled", False)):
+            if has_groups and not selected_cellpose:
                 warnings.append(
                     f"{source_name}: cell groups are configured but Cellpose masks are disabled. "
-                    "Enable Cellpose or clear the cell-group conditions for this channel."
+                    "Select a Cellpose mask or clear the cell-group conditions for this channel."
                 )
 
         return warnings
@@ -404,14 +416,20 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
 
         active_defs = self.get_active_image_definitions()
         has_measurement_target = any(
-            bool(image_def.get("analysis_cell_segmentation_enabled", False))
+            bool(
+                cellpose_mask_source_names(image_def)
+                or (
+                    "analysis_cellpose_mask_source" not in image_def
+                    and image_def.get("analysis_cell_segmentation_enabled", False)
+                )
+            )
             or any(bool(value) for value in dict(image_def.get("mask_relationships", {}) or {}).values())
             for image_def in active_defs
             if not hasattr(self, "is_physical_channel_definition") or self.is_physical_channel_definition(image_def)
         )
         if not has_measurement_target:
             self.analysis_matrix_warning_label.setText(
-                "No measurements selected. Turn ON a channel/mask pair here or enable Cellpose for a channel."
+                "No measurements selected. Turn ON a configured-mask or Cellpose-mask intersection."
             )
             self.set_label_message_state(self.analysis_matrix_warning_label, "warning")
             return
@@ -484,6 +502,16 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
                         "source": source_name,
                         "target": target_name,
                         "self": source_name == target_name,
+                    }
+                )
+
+            for cellpose_source in cellpose_mask_source_names(source_def):
+                active_relationships.append(
+                    {
+                        "source": source_name,
+                        "target": f"{cellpose_source}_Cellpose",
+                        "self": source_name == cellpose_source,
+                        "kind": "cellpose",
                     }
                 )
 

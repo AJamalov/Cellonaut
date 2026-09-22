@@ -5,7 +5,7 @@ type: software
 authors:
   - given-names: Adam
     family-names: Jamalov
-version: 1.0.0
+version: 1.0.1
 repository-code: "https://github.com/AJamalov/Cellonaut"
 url: "https://github.com/AJamalov/Cellonaut"
 license: GPL-3.0-or-later

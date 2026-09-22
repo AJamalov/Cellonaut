@@ -17,6 +17,7 @@ import pandas as pd
 import tifffile
 
 from cellonaut.cell_segmentation.core import make_per_cell_table
+from cellonaut.config.relationships import cellpose_intensity_source_name
 from cellonaut.measurement.table_cleanup import drop_derived_ratio_columns
 from cellonaut.masks.adjustments import adjust_label_image as adjust_label_image
 from cellonaut.masks.adjustments import adjust_mask_image as adjust_mask_image
@@ -421,8 +422,11 @@ def _find_legacy_preview_filter_data(
         result_candidates.append(preview_path.stem)
 
     source_def = find_image_def_for_label(image_defs, source_label) or {}
-    cell_source_label = str(source_def.get("analysis_cell_segmentation_source", "") or source_label).strip()
+    cell_source_label = cellpose_intensity_source_name(source_def, image_defs) or source_label
+    cellpose_mask_label = str(source_def.get("analysis_cellpose_mask_source", "") or "").strip()
     label_candidates = [label for label in [source_label, *source_candidates] if label]
+    if cellpose_mask_label and cellpose_mask_label not in label_candidates:
+        label_candidates.append(cellpose_mask_label)
     if cell_source_label and cell_source_label not in label_candidates:
         label_candidates.append(cell_source_label)
 
@@ -758,15 +762,31 @@ def export_all_filtered_result_tables(
             messages.append(f"Skipped {table_path.name}: no current cell-group settings found for {label_text}")
             continue
 
+        image_def = dict(image_def)
+        artifact_cell_mask_label = ""
+        if record is not None and record.get("cell_mask"):
+            mask_definition = image_definition(
+                {"target": record["cell_mask"], "label": ""}, image_defs
+            )
+            artifact_cell_mask_label = str((mask_definition or {}).get("name", "") or "").strip()
+            if artifact_cell_mask_label:
+                image_def["analysis_cellpose_mask_sources"] = [artifact_cell_mask_label]
+                image_def["analysis_cellpose_mask_source"] = artifact_cell_mask_label
         source_label = str(image_def.get("name") or source_label)
         try:
             if resolver is not None and record is not None:
-                signals = [
-                    (resolver.path(item), item["mask_label"])
-                    for item in resolver.matching(
-                        sample=record["sample"], target=record["target"], kind="cell_signal"
-                    )
+                signal_records = resolver.matching(
+                    sample=record["sample"], target=record["target"], kind="cell_signal"
+                )
+                record_cell_mask = str(record.get("cell_mask", "") or "")
+                exact_signal_records = [
+                    item for item in signal_records
+                    if str(item.get("cell_mask", "") or "") == record_cell_mask
                 ]
+                selected_signal_records = exact_signal_records or [
+                    item for item in signal_records if not str(item.get("cell_mask", "") or "")
+                ]
+                signals = [(resolver.path(item), item["mask_label"]) for item in selected_signal_records]
             else:
                 signals = _find_signal_tables(root, result_id, source_label, relative_parent)
         except ArtifactMetadataError as exc:
@@ -820,6 +840,9 @@ def export_all_filtered_result_tables(
         row: dict[str, Any] = {
             "Label": result_id,
             "SourceImageLabel": source_label,
+            "CellposeMaskLabel": artifact_cell_mask_label or str(
+                image_def.get("analysis_cellpose_mask_source", "") or ""
+            ),
             f"{source_label}_CellCount_TotalBeforeQC": total_count,
             f"{source_label}_CellCount": len(kept_labels),
             f"{source_label}_CellQC_OutOfRangeCount": int(summary.get("cell_flagged", 0) or 0),
@@ -827,7 +850,9 @@ def export_all_filtered_result_tables(
             f"{source_label}_QC_ExcludedCount": int(summary.get("excluded", 0) or 0),
         }
 
-        cell_source = str(image_def.get("analysis_cell_segmentation_source", "") or source_label)
+        cell_source = cellpose_intensity_source_name(
+            image_def, image_defs, artifact_cell_mask_label
+        ) or source_label
         row.update(summarize_per_cell_table(kept_cell_rows, "", source_label, cell_source))
         table_stem = table_path.stem
         kept_path = sample_out_dir / f"{table_stem}_filtered.csv"
@@ -954,7 +979,11 @@ def saved_mask_filter_metrics(table, settings, layout, relative_parent, result_i
     if not cell_source and all(find_matching_cell_qc_column(table, metric) is not None for metric in normalize_cell_qc_rules(rules)):
         return table
     mask_label = _selected_mask_label(settings)
-    intensity_label = str(settings.get("analysis_cell_segmentation_source", "") or source_label) if cell_source else source_label
+    intensity_label = (
+        cellpose_intensity_source_name(settings, image_defs or []) or source_label
+        if cell_source
+        else source_label
+    )
     from cellonaut.artifact_naming import portable_component
     from cellonaut.io.image_io import read_tiff_numpy_2d
 

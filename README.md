@@ -4,7 +4,7 @@ Cellonaut measures cells and biological structures in microscopy images without 
 It uses Fiji/Weka to create masks and Cellpose to identify individual cells, then
 exports measurements, tables, overlays, and processed images.
 
-Current release: **Cellonaut 1.0.0**. The packaged app includes Python, Fiji,
+Current release: **Cellonaut 1.0.1**. The packaged app includes Python, Fiji,
 Java, and the supported Cellpose models (`cpsam` and `cpsam_v2`).
 This release is available for 64-bit Windows only.
 
@@ -17,8 +17,8 @@ archives are not runnable Cellonaut packages.
 
 ### Windows 10 or 11, 64-bit
 
-Download `Cellonaut-1.0.0-windows.exe`, every matching `.bin` file, and
-`Cellonaut-1.0.0-windows.sha256`.
+Download `Cellonaut-1.0.1-windows.exe`, every matching `.bin` file, and
+`Cellonaut-1.0.1-windows.sha256`.
 
 Choose **Automatic** for compatible NVIDIA GPU acceleration with CPU fallback,
 or **CPU only** to always use the CPU. AMD and Intel graphics use the CPU.

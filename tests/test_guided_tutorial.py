@@ -285,7 +285,7 @@ def test_tutorial_builds_real_logo_pipeline_settings(qt_application, tmp_path, m
     assert gui.measurement_options["mean"] is True
     assert gui.measurement_options["raw_intden"] is True
     assert gui.measurement_options["positive_area_in_cell"] is False
-    assert "per-cell measurements are selected" not in gui.analysis_matrix_warning_label.text()
+    assert "Measurements of configured masks within Cellpose cells are selected" not in gui.analysis_matrix_warning_label.text()
 
     gui._tutorial_preview_state = "idle"
     assert gui._apply_tutorial_step(actions["check"]) is True
@@ -315,11 +315,11 @@ def test_measurement_warning_reads_committed_choices(qt_application, monkeypatch
 
     gui.update_analysis_matrix_warning_label()
 
-    assert "per-cell measurements are selected" in gui.analysis_matrix_warning_label.text()
+    assert "Measurements of configured masks within Cellpose cells are selected" in gui.analysis_matrix_warning_label.text()
     assert gui.measurement_options["positive_area_in_cell"] is True
     gui.commit_gui_edits()
     gui.update_analysis_matrix_warning_label()
-    assert "per-cell measurements are selected" not in gui.analysis_matrix_warning_label.text()
+    assert "Measurements of configured masks within Cellpose cells are selected" not in gui.analysis_matrix_warning_label.text()
     assert gui.measurement_options["positive_area_in_cell"] is False
 
 

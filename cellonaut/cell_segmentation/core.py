@@ -12,6 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
+from scipy.stats import kurtosis as scipy_kurtosis
+from scipy.stats import skew as scipy_skew
 from skimage.measure import find_contours, regionprops, regionprops_table
 
 from cellonaut.runtime import PipelineRuntime
@@ -281,14 +283,21 @@ def remove_border_labels_fn(label_img: np.ndarray) -> np.ndarray:
     return relabel_sequential(out)
 
 
-def make_per_cell_table(label_img: np.ndarray, intensity_img: np.ndarray) -> pd.DataFrame:
+def make_per_cell_table(
+    label_img: np.ndarray,
+    intensity_img: np.ndarray,
+    *,
+    include_columns: set[str] | None = None,
+) -> pd.DataFrame:
     """Measure a 2-D label image against matching intensity pixels.
 
     Zero is background; positive IDs become CellID. Area is in pixels squared
     and perimeter in pixels, without spatial calibration. RawIntDen and IntDen
     both equal area times mean intensity. Circularity is 4*pi*area/perimeter**2
-    (NaN for zero perimeter). A trailing 1/3/4-component intensity axis uses
-    component zero. Inputs are not modified; no cells yields a schema-only table.
+    (NaN for zero perimeter). Optional columns add the native equivalents used
+    by Cellpose whole-cell measurement choices without requiring Fiji. A trailing
+    1/3/4-component intensity axis uses component zero. Inputs are not modified;
+    no cells yields a schema-only table.
     """
 
     label_img = np.asarray(label_img, dtype=np.int32)
@@ -299,13 +308,23 @@ def make_per_cell_table(label_img: np.ndarray, intensity_img: np.ndarray) -> pd.
             f"Label image shape {label_img.shape[:2]} does not match intensity image shape {intensity_img.shape[:2]}"
         )
 
-    if label_img.max() == 0:
-        return pd.DataFrame(columns=pd.Index(["CellID", "Area", "Perimeter", "Solidity", "Circularity", "Mean", "Min", "Max", "Median", "RawIntDen", "IntDen"]))
-
     if intensity_img.ndim == 3:
         if intensity_img.shape[-1] not in (1, 3, 4):
             raise ValueError(f"Unsupported intensity image shape for measurement: {intensity_img.shape}")
         intensity_img = intensity_img[..., 0]
+
+    requested = set(include_columns or ())
+    base_columns = [
+        "CellID", "Area", "Perimeter", "Solidity", "Circularity",
+        "Mean", "Min", "Max", "Median", "RawIntDen", "IntDen",
+    ]
+    optional_order = [
+        "StdDev", "Mode", "CentroidX", "CentroidY", "CenterOfMassX", "CenterOfMassY",
+        "BoundingRectX", "BoundingRectY", "BoundingRectWidth", "BoundingRectHeight",
+        "EllipseMajor", "EllipseMinor", "EllipseAngle", "Feret", "Skewness", "Kurtosis",
+    ]
+    if label_img.max() == 0:
+        return pd.DataFrame(columns=pd.Index([*base_columns, *(name for name in optional_order if name in requested)]))
 
     props = regionprops_table(
         label_img,
@@ -324,9 +343,10 @@ def make_per_cell_table(label_img: np.ndarray, intensity_img: np.ndarray) -> pd.
 
     df["RawIntDen"] = df["area"] * df["intensity_mean"]
     df["IntDen"] = df["RawIntDen"]
+    cell_regions = regionprops(label_img, intensity_image=intensity_img)
     medians = {
         int(item.label): float(np.median(item.intensity_image[item.image]))
-        for item in regionprops(label_img, intensity_image=intensity_img)
+        for item in cell_regions
     }
     df["Median"] = pd.Series(df["label"], index=df.index).map(medians)
     perimeter = np.asarray(pd.to_numeric(df["perimeter"], errors="coerce"), dtype=float)
@@ -340,7 +360,88 @@ def make_per_cell_table(label_img: np.ndarray, intensity_img: np.ndarray) -> pd.
     )
     df["Circularity"] = circularity
 
-    return df.rename(
+    rows_by_label = {int(item.label): item for item in cell_regions}
+
+    def values_by_label(value_for_region: Callable[[Any], float]) -> pd.Series:
+        values = {label: value_for_region(item) for label, item in rows_by_label.items()}
+        return pd.Series(df["label"], index=df.index).map(values)
+
+    def pixels(item: Any) -> np.ndarray:
+        return np.asarray(item.intensity_image[item.image], dtype=float)
+
+    def center_of_mass_coordinate(item: Any, axis: int) -> float:
+        coordinates = np.asarray(item.coords, dtype=float)
+        weights = pixels(item)
+        total_weight = float(np.sum(weights))
+        if not np.isfinite(total_weight) or total_weight == 0.0:
+            return np.nan
+        value = float(np.sum(coordinates[:, axis] * weights) / total_weight)
+        return value if np.isfinite(value) else np.nan
+
+    if "StdDev" in requested:
+        df["StdDev"] = values_by_label(
+            lambda item: float(np.std(pixels(item), ddof=1)) if pixels(item).size > 1 else np.nan
+        )
+    if "Mode" in requested:
+        def modal_value(item: Any) -> float:
+            values, counts = np.unique(pixels(item), return_counts=True)
+            return float(values[int(np.argmax(counts))]) if values.size else np.nan
+
+        df["Mode"] = values_by_label(modal_value)
+    if {"CentroidX", "CentroidY"}.intersection(requested):
+        if "CentroidX" in requested:
+            df["CentroidX"] = values_by_label(lambda item: float(item.centroid[1]))
+        if "CentroidY" in requested:
+            df["CentroidY"] = values_by_label(lambda item: float(item.centroid[0]))
+    if {"CenterOfMassX", "CenterOfMassY"}.intersection(requested):
+        if "CenterOfMassX" in requested:
+            df["CenterOfMassX"] = values_by_label(
+                lambda item: center_of_mass_coordinate(item, 1)
+            )
+        if "CenterOfMassY" in requested:
+            df["CenterOfMassY"] = values_by_label(
+                lambda item: center_of_mass_coordinate(item, 0)
+            )
+    if {
+        "BoundingRectX", "BoundingRectY", "BoundingRectWidth", "BoundingRectHeight"
+    }.intersection(requested):
+        if "BoundingRectX" in requested:
+            df["BoundingRectX"] = values_by_label(lambda item: float(item.bbox[1]))
+        if "BoundingRectY" in requested:
+            df["BoundingRectY"] = values_by_label(lambda item: float(item.bbox[0]))
+        if "BoundingRectWidth" in requested:
+            df["BoundingRectWidth"] = values_by_label(lambda item: float(item.bbox[3] - item.bbox[1]))
+        if "BoundingRectHeight" in requested:
+            df["BoundingRectHeight"] = values_by_label(lambda item: float(item.bbox[2] - item.bbox[0]))
+    if {"EllipseMajor", "EllipseMinor", "EllipseAngle"}.intersection(requested):
+        if "EllipseMajor" in requested:
+            df["EllipseMajor"] = values_by_label(lambda item: float(item.axis_major_length))
+        if "EllipseMinor" in requested:
+            df["EllipseMinor"] = values_by_label(lambda item: float(item.axis_minor_length))
+        if "EllipseAngle" in requested:
+            df["EllipseAngle"] = values_by_label(
+                lambda item: float((90.0 - np.degrees(item.orientation)) % 180.0)
+            )
+    if "Feret" in requested:
+        df["Feret"] = values_by_label(lambda item: float(item.feret_diameter_max))
+    if "Skewness" in requested:
+        df["Skewness"] = values_by_label(
+            lambda item: (
+                float(scipy_skew(pixels(item), bias=False))
+                if pixels(item).size >= 3 and float(np.ptp(pixels(item))) > 0
+                else np.nan
+            )
+        )
+    if "Kurtosis" in requested:
+        df["Kurtosis"] = values_by_label(
+            lambda item: (
+                float(scipy_kurtosis(pixels(item), fisher=True, bias=False))
+                if pixels(item).size >= 4 and float(np.ptp(pixels(item))) > 0
+                else np.nan
+            )
+        )
+
+    renamed = df.rename(
         columns={
             "label": "CellID",
             "area": "Area",
@@ -351,6 +452,7 @@ def make_per_cell_table(label_img: np.ndarray, intensity_img: np.ndarray) -> pd.
             "intensity_max": "Max",
         }
     )
+    return renamed.loc[:, [*base_columns, *(name for name in optional_order if name in requested)]]
 
 
 # Centralize empty-region handling so raw and corrected intensity paths use identical rules.
@@ -382,12 +484,68 @@ def _masked_intensity_distribution(intensity_img: np.ndarray, mask: np.ndarray) 
     }
 
 
+_MASK_WITHIN_CELL_SOURCE_COLUMNS = (
+    ("Area", "Area"),
+    ("Mean", "Mean"),
+    ("StdDev", "StdDev"),
+    ("Mode", "Mode"),
+    ("Min", "Min"),
+    ("Max", "Max"),
+    ("CentroidX", "CentroidX"),
+    ("CentroidY", "CentroidY"),
+    ("CenterOfMassX", "CenterOfMassX"),
+    ("CenterOfMassY", "CenterOfMassY"),
+    ("Perimeter", "Perimeter"),
+    ("BoundingRectX", "BoundingRectX"),
+    ("BoundingRectY", "BoundingRectY"),
+    ("BoundingRectWidth", "BoundingRectWidth"),
+    ("BoundingRectHeight", "BoundingRectHeight"),
+    ("EllipseMajor", "EllipseMajor"),
+    ("EllipseMinor", "EllipseMinor"),
+    ("EllipseAngle", "EllipseAngle"),
+    ("Feret", "Feret"),
+    ("Circularity", "Circularity"),
+    ("Solidity", "Solidity"),
+    ("RawIntDen", "IntDen"),
+    ("Median", "Median"),
+    ("Skewness", "Skewness"),
+    ("Kurtosis", "Kurtosis"),
+)
+
+_MASK_WITHIN_CELL_OPTIONAL_COLUMNS = {
+    source for source, _suffix in _MASK_WITHIN_CELL_SOURCE_COLUMNS
+} - {"Area", "Mean", "Min", "Max", "Perimeter", "Circularity", "Solidity", "RawIntDen", "Median"}
+
+_MASK_WITHIN_CELL_OPTION_SOURCE_COLUMNS = {
+    "positive_area_in_cell": {"Area"},
+    "mean_in_positive_area": {"Mean"},
+    "std_dev_in_positive_area": {"StdDev"},
+    "mode_in_positive_area": {"Mode"},
+    "min_max_in_positive_area": {"Min", "Max"},
+    "centroid_in_positive_area": {"CentroidX", "CentroidY"},
+    "center_of_mass_in_positive_area": {"CenterOfMassX", "CenterOfMassY"},
+    "perimeter_in_positive_area": {"Perimeter"},
+    "bounding_rect_in_positive_area": {
+        "BoundingRectX", "BoundingRectY", "BoundingRectWidth", "BoundingRectHeight",
+    },
+    "fit_ellipse_in_positive_area": {"EllipseMajor", "EllipseMinor", "EllipseAngle"},
+    "feret_in_positive_area": {"Feret"},
+    "circularity_in_positive_area": {"Circularity"},
+    "solidity_in_positive_area": {"Solidity"},
+    "raw_intden_in_cell": {"RawIntDen"},
+    "median_in_positive_area": {"Median"},
+    "skewness_in_positive_area": {"Skewness"},
+    "kurtosis_in_positive_area": {"Kurtosis"},
+}
+
+
 def make_per_cell_organelle_signal_tables(
     cell_label_img: np.ndarray,
     organelle_mask: np.ndarray,
     intensity_img: np.ndarray,
     organelle_prefix: str = "Organelle",
     corrected_intensity_img: Optional[np.ndarray] = None,
+    measurement_options: Optional[Dict[str, bool]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Return (signal, geometry) tables for matching YX labels, mask and intensity.
 
@@ -444,6 +602,25 @@ def make_per_cell_organelle_signal_tables(
             neginf=0.0,
         )
 
+    masked_cell_labels = np.where(organelle_mask, cell_label_img, 0)
+    requested_mask_columns = _MASK_WITHIN_CELL_OPTIONAL_COLUMNS
+    if measurement_options is not None:
+        requested_mask_columns = {
+            source_column
+            for option_key, source_columns in _MASK_WITHIN_CELL_OPTION_SOURCE_COLUMNS.items()
+            if measurement_options.get(option_key, False)
+            for source_column in source_columns
+        }
+    mask_measurements = make_per_cell_table(
+        masked_cell_labels,
+        raw_intensity_img,
+        include_columns=requested_mask_columns,
+    )
+    mask_measurements_by_cell = {
+        int(record["CellID"]): record
+        for record in mask_measurements.to_dict(orient="records")
+    }
+
     biology_rows: List[Dict[str, Any]] = []
     geometry_rows: List[Dict[str, Any]] = []
 
@@ -462,7 +639,6 @@ def make_per_cell_organelle_signal_tables(
         rest_area = int(rest_of_cell_mask.sum())
 
         raw_cell_mean, raw_cell_intden = _masked_intensity_stats(raw_intensity_img, cell_mask)
-        organelle_stats = _masked_intensity_distribution(raw_intensity_img, organelle_in_cell)
         raw_rest_mean, raw_rest_intden = _masked_intensity_stats(raw_intensity_img, rest_of_cell_mask)
 
         ys, xs = np.where(cell_mask)
@@ -473,22 +649,24 @@ def make_per_cell_organelle_signal_tables(
         bbox_max_row = int(ys.max()) + 1
         bbox_max_col = int(xs.max()) + 1
 
-        row = {
+        row: Dict[str, Any] = {
             "CellID": int(cell_id),
             "CellArea": cell_area,
             "CellMean": raw_cell_mean,
             "CellIntDen": raw_cell_intden,
-            f"{organelle_prefix}Area_InCell": organelle_area,
-            f"{organelle_prefix}Mean_InCell": organelle_stats["mean"],
-            f"{organelle_prefix}StdDev_InCell": organelle_stats["std_dev"],
-            f"{organelle_prefix}Min_InCell": organelle_stats["min"],
-            f"{organelle_prefix}Max_InCell": organelle_stats["max"],
-            f"{organelle_prefix}Median_InCell": organelle_stats["median"],
-            f"{organelle_prefix}IntDen_InCell": organelle_stats["intden"],
             "RestOfCellArea": rest_area,
             "RestOfCellMean": raw_rest_mean,
             "RestOfCellIntDen": raw_rest_intden,
         }
+        mask_values = mask_measurements_by_cell.get(int(cell_id), {})
+        for source_column, suffix in _MASK_WITHIN_CELL_SOURCE_COLUMNS:
+            if source_column == "Area":
+                value = float(organelle_area)
+            elif source_column == "RawIntDen" and not mask_values:
+                value = 0.0
+            else:
+                value = mask_values.get(source_column, np.nan)
+            row[f"{organelle_prefix}{suffix}_InCell"] = value
         if corrected_img is not None:
             corrected_cell_mean, corrected_cell_intden = _masked_intensity_stats(corrected_img, cell_mask)
             corrected_organelle_stats = _masked_intensity_distribution(corrected_img, organelle_in_cell)
@@ -526,7 +704,10 @@ def make_per_cell_organelle_signal_tables(
     geometry_df = pd.DataFrame(geometry_rows)
     if not biology_rows:
         columns = ["CellID", "CellArea", "CellMean", "CellIntDen", "RestOfCellArea", "RestOfCellMean", "RestOfCellIntDen"]
-        columns.extend(f"{organelle_prefix}{metric}_InCell" for metric in ("Area", "Mean", "StdDev", "Min", "Max", "Median", "IntDen"))
+        columns.extend(
+            f"{organelle_prefix}{suffix}_InCell"
+            for _source, suffix in _MASK_WITHIN_CELL_SOURCE_COLUMNS
+        )
         if corrected_img is not None:
             columns.extend(["CellCorrectedMean", "CellCorrectedIntDen", "RestOfCellCorrectedMean", "RestOfCellCorrectedIntDen"])
             columns.extend(f"{organelle_prefix}Corrected{metric}_InCell" for metric in ("Mean", "StdDev", "Min", "Max", "Median", "IntDen"))
@@ -553,6 +734,7 @@ def export_per_cell_organelle_signal_tables(
         intensity_img=intensity_img,
         organelle_prefix=organelle_prefix,
         corrected_intensity_img=corrected_intensity_img,
+        measurement_options=measurement_options,
     )
 
     if measurement_options is not None:
@@ -569,12 +751,36 @@ def export_per_cell_organelle_signal_tables(
                 f"{organelle_prefix}StdDev_InCell",
                 f"{organelle_prefix}CorrectedStdDev_InCell",
             ],
+            "mode_in_positive_area": [f"{organelle_prefix}Mode_InCell"],
             "min_max_in_positive_area": [
                 f"{organelle_prefix}Min_InCell",
                 f"{organelle_prefix}Max_InCell",
                 f"{organelle_prefix}CorrectedMin_InCell",
                 f"{organelle_prefix}CorrectedMax_InCell",
             ],
+            "centroid_in_positive_area": [
+                f"{organelle_prefix}CentroidX_InCell",
+                f"{organelle_prefix}CentroidY_InCell",
+            ],
+            "center_of_mass_in_positive_area": [
+                f"{organelle_prefix}CenterOfMassX_InCell",
+                f"{organelle_prefix}CenterOfMassY_InCell",
+            ],
+            "perimeter_in_positive_area": [f"{organelle_prefix}Perimeter_InCell"],
+            "bounding_rect_in_positive_area": [
+                f"{organelle_prefix}BoundingRectX_InCell",
+                f"{organelle_prefix}BoundingRectY_InCell",
+                f"{organelle_prefix}BoundingRectWidth_InCell",
+                f"{organelle_prefix}BoundingRectHeight_InCell",
+            ],
+            "fit_ellipse_in_positive_area": [
+                f"{organelle_prefix}EllipseMajor_InCell",
+                f"{organelle_prefix}EllipseMinor_InCell",
+                f"{organelle_prefix}EllipseAngle_InCell",
+            ],
+            "feret_in_positive_area": [f"{organelle_prefix}Feret_InCell"],
+            "circularity_in_positive_area": [f"{organelle_prefix}Circularity_InCell"],
+            "solidity_in_positive_area": [f"{organelle_prefix}Solidity_InCell"],
             "median_in_positive_area": [
                 f"{organelle_prefix}Median_InCell",
                 f"{organelle_prefix}CorrectedMedian_InCell",
@@ -583,6 +789,8 @@ def export_per_cell_organelle_signal_tables(
                 f"{organelle_prefix}IntDen_InCell",
                 f"{organelle_prefix}CorrectedIntDen_InCell",
             ],
+            "skewness_in_positive_area": [f"{organelle_prefix}Skewness_InCell"],
+            "kurtosis_in_positive_area": [f"{organelle_prefix}Kurtosis_InCell"],
         }
         omitted = [
             column
@@ -600,6 +808,23 @@ def export_per_cell_organelle_signal_tables(
         f"{organelle_prefix}Min_InCell",
         f"{organelle_prefix}Max_InCell",
         f"{organelle_prefix}Median_InCell",
+        f"{organelle_prefix}Mode_InCell",
+        f"{organelle_prefix}CentroidX_InCell",
+        f"{organelle_prefix}CentroidY_InCell",
+        f"{organelle_prefix}CenterOfMassX_InCell",
+        f"{organelle_prefix}CenterOfMassY_InCell",
+        f"{organelle_prefix}BoundingRectX_InCell",
+        f"{organelle_prefix}BoundingRectY_InCell",
+        f"{organelle_prefix}BoundingRectWidth_InCell",
+        f"{organelle_prefix}BoundingRectHeight_InCell",
+        f"{organelle_prefix}EllipseMajor_InCell",
+        f"{organelle_prefix}EllipseMinor_InCell",
+        f"{organelle_prefix}EllipseAngle_InCell",
+        f"{organelle_prefix}Feret_InCell",
+        f"{organelle_prefix}Circularity_InCell",
+        f"{organelle_prefix}Solidity_InCell",
+        f"{organelle_prefix}Skewness_InCell",
+        f"{organelle_prefix}Kurtosis_InCell",
         "CellCorrectedMean",
         "RestOfCellCorrectedMean",
         f"{organelle_prefix}CorrectedMean_InCell",

@@ -380,7 +380,7 @@ class ConfigurationSummaryDialog(QDialog):
 
         if not relationships:
             empty = QLabel(
-                "No channel/mask region measurements are selected. Cellpose-only measured channels, if enabled, are listed under Cellpose."
+                "No configured-mask or Cellpose-mask measurement regions are selected."
             )
             empty.setProperty("muted", "true")
             layout.addWidget(empty)
@@ -388,7 +388,9 @@ class ConfigurationSummaryDialog(QDialog):
 
         rows = []
         for rel in relationships:
-            if rel.get("self", False):
+            if rel.get("kind") == "cellpose":
+                meaning = f"Measured using reusable {rel.get('target', '')} mask"
+            elif rel.get("self", False):
                 meaning = "Measured with own mask"
             else:
                 meaning = f"Measured using {rel.get('target', '')} mask"
@@ -421,7 +423,7 @@ class ConfigurationSummaryDialog(QDialog):
         rows = self.summary.get("cell_segmentation", []) or []
 
         if not rows:
-            empty = QLabel("Cellpose is not enabled for any measured channel.")
+            empty = QLabel("No reusable Cellpose masks are configured.")
             empty.setProperty("muted", "true")
             layout.addWidget(empty)
             return card
@@ -430,7 +432,7 @@ class ConfigurationSummaryDialog(QDialog):
         for item in rows:
             table_rows.append(
                 [
-                    item.get("source", ""),
+                    f"{item.get('source', '')}_Cellpose",
                     item.get("seg_source", ""),
                     item.get("diameter", ""),
                     item.get("min_size", ""),
@@ -443,7 +445,7 @@ class ConfigurationSummaryDialog(QDialog):
         layout.addWidget(
             self.make_table(
                 [
-                    "Measured channel",
+                    "Cellpose mask",
                     "Cellpose source channel",
                     "Diameter (px)",
                     "Minimum cell area (px²)",

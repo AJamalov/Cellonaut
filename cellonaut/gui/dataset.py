@@ -150,7 +150,7 @@ class CellonautGuiDatasetMixin(
         table.setVerticalHeaderLabels(names)
         table.setHorizontalHeaderLabels(headers)
         header_help = [
-            "Create a Cellpose whole-cell mask so this row produces per-cell measurements.",
+            "Create one reusable Cellpose mask for this channel. It becomes a Channel_Cellpose column in Measurements.",
             "Leave out partial cells that touch the image boundary.",
             "Image channel Cellpose uses to find cell boundaries; it may differ from the measured row.",
             "Built-in Cellpose model used for segmentation.",
@@ -173,7 +173,7 @@ class CellonautGuiDatasetMixin(
             is_enabled = bool(image_def.get("analysis_cell_segmentation_enabled", False))
             enable_button = self.make_processing_enabled_button(
                 is_enabled,
-                "Enable Cellpose whole-cell masks for this measured channel.",
+                "Create a reusable Cellpose whole-cell mask owned by this channel.",
             )
             enable_button.toggled.connect(self.on_cellpose_settings_table_changed)
             enable_widget = QWidget()
@@ -281,6 +281,7 @@ class CellonautGuiDatasetMixin(
             enable_widget = table.cellWidget(row_idx, 0)
             enable_button = enable_widget.findChild(QPushButton) if enable_widget is not None else None
             enable_cb = enable_widget.findChild(QCheckBox) if enable_widget is not None else None
+            was_enabled = bool(image_def.get("analysis_cell_segmentation_enabled", False))
             image_def["analysis_cell_segmentation_enabled"] = (
                 bool(enable_button.isChecked())
                 if enable_button is not None
@@ -288,6 +289,14 @@ class CellonautGuiDatasetMixin(
                 if enable_cb is not None
                 else bool(image_def.get("analysis_cell_segmentation_enabled", False))
             )
+            if (
+                image_def["analysis_cell_segmentation_enabled"]
+                and not was_enabled
+                and not list(image_def.get("analysis_cellpose_mask_sources", []) or [])
+                and not str(image_def.get("analysis_cellpose_mask_source", "") or "").strip()
+            ):
+                image_def["analysis_cellpose_mask_source"] = str(image_def.get("name", "") or "").strip()
+                image_def["analysis_cellpose_mask_sources"] = [image_def["analysis_cellpose_mask_source"]]
 
             rb_widget = table.cellWidget(row_idx, 1)
             rb_cb = (
@@ -361,6 +370,11 @@ class CellonautGuiDatasetMixin(
         self.refresh_analysis_matrix_from_definitions()
         self.validate_cellpose_settings_table()
 
+    def on_analysis_matrix_cellpose_changed(self, row: int, column: int, checked: bool) -> None:
+        if self._rebuilding_image_tabs:
+            return
+        self.on_analysis_matrix_changed()
+
     # The matrix is derived rather than incrementally patched because channel and
     # mask additions can change both its row and column ownership at once.
     def build_analysis_matrix_for_current_source(self):
@@ -374,8 +388,17 @@ class CellonautGuiDatasetMixin(
         source_rows, target_rows = self.analysis_matrix_definition_rows(active_defs)
         target_names = [names[index] for index, _image_def in target_rows]
         source_names = [names[index] for index, _image_def in source_rows]
+        cellpose_rows = [
+            (index, image_def)
+            for index, image_def in source_rows
+            if bool(image_def.get("analysis_cell_segmentation_enabled", False))
+        ]
+        cellpose_names = [names[index] for index, _image_def in cellpose_rows]
 
         self._analysis_relationship_column_count = len(target_rows)
+        self._analysis_cellpose_columns = {
+            len(target_rows) + offset: name for offset, name in enumerate(cellpose_names)
+        }
 
         table = self.analysis_matrix_table
         table.blockSignals(True)
@@ -385,8 +408,8 @@ class CellonautGuiDatasetMixin(
             self._analysis_matrix_cell_click_connected = True
 
         table.setRowCount(len(source_rows))
-        table.setColumnCount(len(target_rows))
-        table.setHorizontalHeaderLabels(target_names)
+        table.setColumnCount(len(target_rows) + len(cellpose_rows))
+        table.setHorizontalHeaderLabels([*target_names, *(f"{name}_Cellpose" for name in cellpose_names)])
         table.setVerticalHeaderLabels(source_names)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -418,7 +441,32 @@ class CellonautGuiDatasetMixin(
 
                 table.setCellWidget(row_idx, col_offset, toggle)
 
-        for column in range(len(target_rows)):
+            selected_cellpose = set(source_def.get("analysis_cellpose_mask_sources", []) or [])
+            if not selected_cellpose:
+                legacy_source = str(source_def.get("analysis_cellpose_mask_source", "") or "").strip()
+                selected_cellpose = {legacy_source} if legacy_source else set()
+            for offset, cellpose_name in enumerate(cellpose_names):
+                column = len(target_rows) + offset
+                cellpose_toggle = MatrixToggleButton(cellpose_name in selected_cellpose)
+                cellpose_toggle.setToolTip(
+                    f"Turn ON to measure {source_names[row_idx]} inside the reusable "
+                    f"{cellpose_name}_Cellpose mask. Any number of Cellpose masks can be selected for this channel."
+                )
+                cellpose_toggle.clicked.connect(
+                    lambda checked=False, row=row_idx, col=column: self.on_analysis_matrix_cellpose_changed(
+                        row, col, checked
+                    )
+                )
+                table.setCellWidget(row_idx, column, cellpose_toggle)
+
+        for column, cellpose_name in self._analysis_cellpose_columns.items():
+            cellpose_header = table.horizontalHeaderItem(column)
+            if cellpose_header is not None:
+                cellpose_header.setToolTip(
+                    f"Cellpose mask configured on {cellpose_name}. It is generated once per sample and can measure any channel row."
+                )
+
+        for column in range(table.columnCount()):
             table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
         table.resizeRowsToContents()
         for row_idx in range(table.rowCount()):
@@ -464,6 +512,20 @@ class CellonautGuiDatasetMixin(
                     relationships[target_name] = bool(toggle.isChecked())
 
             source_def["mask_relationships"] = relationships
+            selected_cellpose = [
+                cellpose_name
+                for column, cellpose_name in getattr(self, "_analysis_cellpose_columns", {}).items()
+                if isinstance(table.cellWidget(row_idx, column), QPushButton)
+                and table.cellWidget(row_idx, column).isChecked()
+            ]
+            represented_cellpose_names = set(getattr(self, "_analysis_cellpose_columns", {}).values())
+            previous_cellpose = set(source_def.get("analysis_cellpose_mask_sources", []) or [])
+            legacy_source = str(source_def.get("analysis_cellpose_mask_source", "") or "").strip()
+            if legacy_source:
+                previous_cellpose.add(legacy_source)
+            if selected_cellpose or previous_cellpose.intersection(represented_cellpose_names):
+                source_def["analysis_cellpose_mask_sources"] = selected_cellpose
+                source_def["analysis_cellpose_mask_source"] = selected_cellpose[0] if selected_cellpose else ""
 
     # Rebuild from committed state; callers capture pending edits explicitly.
     def refresh_analysis_matrix_from_definitions(self):
@@ -510,8 +572,7 @@ class CellonautGuiDatasetMixin(
         if not hasattr(self, "analysis_matrix_table"):
             return
 
-        relationship_count = int(getattr(self, "_analysis_relationship_column_count", 0) or 0)
-        if col >= relationship_count:
+        if col >= self.analysis_matrix_table.columnCount():
             return
 
         toggle = self.analysis_matrix_table.cellWidget(row, col)
@@ -519,7 +580,10 @@ class CellonautGuiDatasetMixin(
             return
 
         toggle.setChecked(not toggle.isChecked())
-        self.on_analysis_matrix_changed()
+        if col in getattr(self, "_analysis_cellpose_columns", {}):
+            self.on_analysis_matrix_cellpose_changed(row, col, toggle.isChecked())
+        else:
+            self.on_analysis_matrix_changed()
 
     # These controls sit inside a scrolling page; requiring focus prevents a
     # stray wheel event from silently changing scientific settings.

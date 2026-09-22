@@ -5,6 +5,7 @@ import json
 
 import pytest
 from PySide6.QtCore import QSignalBlocker
+from PySide6.QtWidgets import QPushButton
 
 from cellonaut.config.adapter import build_pipeline_config_from_gui_state
 from cellonaut.config.state import EditableGuiConfiguration
@@ -106,6 +107,119 @@ def test_pending_editors_are_captured_by_immediate_preset_save(window, tmp_path)
     assert saved["output_dir"] == str(tmp_path / "latest-output")
 
 
+def test_cellpose_only_channel_is_visible_and_runnable_from_measurement_matrix(window):
+    window.apply_preset_dict(
+        {
+            "image_definitions": [
+                {
+                    "name": "Cells",
+                    "folder": "Cells",
+                    "mask_slot_enabled": False,
+                    "analysis_cell_segmentation_enabled": True,
+                }
+            ]
+        },
+        schedule_scan=False,
+    )
+
+    matrix = window.analysis_matrix_table
+    assert matrix.rowCount() == 1
+    assert matrix.columnCount() == 1
+    assert matrix.horizontalHeaderItem(0).text() == "Cells_Cellpose"
+    cellpose_toggle = matrix.cellWidget(0, 0)
+    assert cellpose_toggle.isChecked() is True
+
+    config = build_pipeline_config_from_gui_state(window.collect_gui_state())
+    assert len(config.measurement_targets) == 1
+    assert config.measurement_targets[0].do_cell_segmentation is True
+    assert config.measurement_targets[0].overlay_roi_keys == []
+
+    cellpose_toggle.click()
+    settings_enable = window.cellpose_settings_table.cellWidget(0, 0).findChild(QPushButton)
+    assert settings_enable.isChecked() is True
+    assert window.get_active_image_definitions()[0]["analysis_cellpose_mask_source"] == ""
+
+    cellpose_toggle.click()
+    assert settings_enable.isChecked() is True
+    assert window.get_active_image_definitions()[0]["analysis_cellpose_mask_source"] == "Cells"
+
+    settings_enable.click()
+    assert window.analysis_matrix_table.columnCount() == 0
+    assert window.get_active_image_definitions()[0]["analysis_cell_segmentation_enabled"] is False
+
+
+def test_one_cellpose_mask_can_measure_multiple_channel_rows(window):
+    window.apply_preset_dict(
+        {
+            "image_definitions": [
+                {
+                    "name": name,
+                    "folder": name,
+                    "mask_slot_enabled": False,
+                    "analysis_cell_segmentation_enabled": index == 0,
+                    "cell_diameter": "41" if index == 0 else "20",
+                }
+                for index, name in enumerate(("Channel1", "Channel2", "Channel3", "Channel4"))
+            ]
+        },
+        schedule_scan=False,
+    )
+
+    matrix = window.analysis_matrix_table
+    assert matrix.rowCount() == 4
+    assert matrix.columnCount() == 1
+    assert matrix.horizontalHeaderItem(0).text() == "Channel1_Cellpose"
+    assert matrix.cellWidget(0, 0).isChecked() is True
+
+    for row in range(1, 4):
+        matrix.cellWidget(row, 0).click()
+
+    definitions = window.get_active_image_definitions()
+    assert [item["analysis_cellpose_mask_source"] for item in definitions] == ["Channel1"] * 4
+    config = build_pipeline_config_from_gui_state(window.collect_gui_state())
+    assert len(config.measurement_targets) == 4
+    assert {target.cell_segmentation_mask_source for target in config.measurement_targets} == {"image1"}
+    assert {target.cell_segmentation_source for target in config.measurement_targets} == {"image1"}
+    assert {target.cell_diameter for target in config.measurement_targets} == {41.0}
+
+
+def test_each_enabled_cellpose_mask_can_be_selected_for_the_same_measured_channel(window):
+    window.apply_preset_dict(
+        {
+            "image_definitions": [
+                {
+                    "name": name,
+                    "folder": name,
+                    "mask_slot_enabled": False,
+                    "analysis_cell_segmentation_enabled": index < 2,
+                }
+                for index, name in enumerate(("Channel1", "Channel2", "Signal"))
+            ]
+        },
+        schedule_scan=False,
+    )
+
+    matrix = window.analysis_matrix_table
+    assert [matrix.horizontalHeaderItem(column).text() for column in range(2)] == [
+        "Channel1_Cellpose",
+        "Channel2_Cellpose",
+    ]
+    matrix.cellWidget(2, 0).click()
+    assert matrix.cellWidget(2, 0).isChecked() is True
+    matrix.cellWidget(2, 1).click()
+    assert matrix.cellWidget(2, 0).isChecked() is True
+    assert matrix.cellWidget(2, 1).isChecked() is True
+    signal_definition = window.get_active_image_definitions()[2]
+    assert signal_definition["analysis_cellpose_mask_sources"] == ["Channel1", "Channel2"]
+    config = build_pipeline_config_from_gui_state(window.collect_gui_state())
+    signal_targets = [target for target in config.measurement_targets if target.source_image_key == "image3"]
+    assert [target.cell_segmentation_mask_source for target in signal_targets] == ["image1", "image2"]
+    assert [target.output_variant for target in signal_targets] == [
+        "Channel1_Cellpose",
+        "Channel2_Cellpose",
+    ]
+
+
 @pytest.mark.parametrize("index,new_name", [(0, "Renamed A"), (1, "Renamed B"), (2, "Renamed mask")])
 def test_rename_commits_and_remaps_even_before_editing_finished(window, index, new_name, tmp_path):
     # The pending name may be committed by Save instead of editingFinished.
@@ -116,6 +230,7 @@ def test_rename_commits_and_remaps_even_before_editing_finished(window, index, n
     assert definitions[index]["name"] == new_name
     assert definitions[2]["mask_source_channel"] == (new_name if index == 0 else "A")
     assert definitions[0]["analysis_cell_segmentation_source"] == (new_name if index == 1 else "B")
+    assert definitions[0]["analysis_cellpose_mask_source"] == (new_name if index == 0 else "A")
     target = new_name if index == 2 else "Mask"
     assert definitions[0]["mask_relationships"][target] is True
     assert definitions[0]["cell_group_mask_source"] == target

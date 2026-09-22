@@ -352,7 +352,7 @@ class CellonautGuiFieldValidationMixin(GuiMixin):
 
         return ok
 
-    # Validate every displayed row because Cellpose settings are stored per measured channel.
+    # Validate every displayed row because each enabled channel owns one reusable Cellpose mask.
     def validate_cellpose_settings_table(self) -> bool:
         if not hasattr(self, "cellpose_settings_table"):
             return True

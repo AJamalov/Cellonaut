@@ -70,6 +70,9 @@ class ImageGuiState:
     cell_group_mask_source: str = ""
     analysis_cell_segmentation_enabled: bool = False
     analysis_cell_segmentation_source: str = ""
+    analysis_cellpose_mask_sources: list[str] = field(default_factory=list)
+    # First selected mask retained for old presets and preview fallbacks.
+    analysis_cellpose_mask_source: str = ""
 
     cell_diameter: str = DEFAULT_CELL_DIAMETER
     cell_min_size: str = DEFAULT_CELL_MIN_SIZE
@@ -107,6 +110,7 @@ class ImageGuiState:
             "stack_z_mode",
             "stack_z_index",
             "analysis_cell_segmentation_source",
+            "analysis_cellpose_mask_source",
             "cell_group_mask_source",
             "cell_diameter",
             "cell_min_size",
@@ -190,6 +194,21 @@ class ImageGuiState:
             if isinstance(sources, (list, tuple))
             else []
         )
+        raw_cellpose_sources = base.get("analysis_cellpose_mask_sources", [])
+        cellpose_sources = (
+            [str(value).strip() for value in raw_cellpose_sources if str(value or "").strip()]
+            if isinstance(raw_cellpose_sources, (list, tuple))
+            else []
+        )
+        legacy_cellpose_source = str(base.get("analysis_cellpose_mask_source", "") or "").strip()
+        if not cellpose_sources and legacy_cellpose_source:
+            cellpose_sources = [legacy_cellpose_source]
+        base["analysis_cellpose_mask_sources"] = list(dict.fromkeys(cellpose_sources))
+        base["analysis_cellpose_mask_source"] = (
+            base["analysis_cellpose_mask_sources"][0]
+            if base["analysis_cellpose_mask_sources"]
+            else ""
+        )
         operation = str(base.get("combined_mask_operation", DEFAULT_COMBINED_MASK_OPERATION) or "").strip().upper()
         base["combined_mask_operation"] = (
             operation if operation in COMBINED_MASK_OPERATION_OPTIONS else DEFAULT_COMBINED_MASK_OPERATION
@@ -197,6 +216,16 @@ class ImageGuiState:
 
         if not base.get("analysis_cell_segmentation_source"):
             base["analysis_cell_segmentation_source"] = base["name"]
+        if (
+            isinstance(data, dict)
+            and "analysis_cellpose_mask_sources" not in data
+            and "analysis_cellpose_mask_source" not in data
+            and base["analysis_cell_segmentation_enabled"]
+        ):
+            # Before reusable Cellpose columns, enabling a row both created and
+            # selected that row's cell mask. Preserve that behavior on import.
+            base["analysis_cellpose_mask_source"] = base["name"]
+            base["analysis_cellpose_mask_sources"] = [base["name"]]
 
         return cls(**{field_name: base[field_name] for field_name in cls.__dataclass_fields__})
 

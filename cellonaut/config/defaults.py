@@ -577,6 +577,31 @@ def default_mask_adjustments() -> dict[str, int]:
     }
 
 
+SHARED_MEASUREMENT_TERMS = (
+    ("area", "cell_area", "positive_area_in_cell"),
+    ("mean", "cell_mean", "mean_in_positive_area"),
+    ("std_dev", "cell_std_dev", "std_dev_in_positive_area"),
+    ("mode", "cell_mode", "mode_in_positive_area"),
+    ("min_max", "cell_min_max", "min_max_in_positive_area"),
+    ("centroid", "cell_centroid", "centroid_in_positive_area"),
+    ("center_of_mass", "cell_center_of_mass", "center_of_mass_in_positive_area"),
+    ("perimeter", "cell_perimeter", "perimeter_in_positive_area"),
+    ("bounding_rect", "cell_bounding_rect", "bounding_rect_in_positive_area"),
+    ("fit_ellipse", "cell_fit_ellipse", "fit_ellipse_in_positive_area"),
+    ("feret", "cell_feret", "feret_in_positive_area"),
+    ("circularity", "cell_circularity", "circularity_in_positive_area"),
+    ("solidity", "cell_solidity", "solidity_in_positive_area"),
+    ("raw_intden", "cell_raw_intden", "raw_intden_in_cell"),
+    ("median", "cell_median", "median_in_positive_area"),
+    ("skewness", "cell_skewness", "skewness_in_positive_area"),
+    ("kurtosis", "cell_kurtosis", "kurtosis_in_positive_area"),
+)
+
+CONFIGURED_MASK_MEASUREMENT_KEYS = tuple(keys[0] for keys in SHARED_MEASUREMENT_TERMS)
+CELLPOSE_MEASUREMENT_KEYS = tuple(keys[1] for keys in SHARED_MEASUREMENT_TERMS)
+CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS = tuple(keys[2] for keys in SHARED_MEASUREMENT_TERMS)
+
+
 DEFAULT_MEASUREMENT_OPTIONS = {
     "area": True,
     "mean": True,
@@ -589,22 +614,46 @@ DEFAULT_MEASUREMENT_OPTIONS = {
     "bounding_rect": False,
     "fit_ellipse": False,
     "feret": False,
+    "circularity": False,
+    "solidity": False,
     "raw_intden": True,
     "median": False,
     "skewness": False,
     "kurtosis": False,
     "cell_area": False,
-    "cell_perimeter": False,
     "cell_mean": False,
+    "cell_std_dev": False,
+    "cell_mode": False,
     "cell_min_max": False,
+    "cell_centroid": False,
+    "cell_center_of_mass": False,
+    "cell_perimeter": False,
+    "cell_bounding_rect": False,
+    "cell_fit_ellipse": False,
+    "cell_feret": False,
+    "cell_circularity": False,
+    "cell_solidity": False,
     "cell_median": False,
     "cell_raw_intden": False,
+    "cell_skewness": False,
+    "cell_kurtosis": False,
     "positive_area_in_cell": False,
     "mean_in_positive_area": False,
     "std_dev_in_positive_area": False,
+    "mode_in_positive_area": False,
     "min_max_in_positive_area": False,
+    "centroid_in_positive_area": False,
+    "center_of_mass_in_positive_area": False,
+    "perimeter_in_positive_area": False,
+    "bounding_rect_in_positive_area": False,
+    "fit_ellipse_in_positive_area": False,
+    "feret_in_positive_area": False,
+    "circularity_in_positive_area": False,
+    "solidity_in_positive_area": False,
     "median_in_positive_area": False,
     "raw_intden_in_cell": False,
+    "skewness_in_positive_area": False,
+    "kurtosis_in_positive_area": False,
 }
 
 MEASUREMENT_METADATA = {
@@ -646,7 +695,7 @@ MEASUREMENT_METADATA = {
     "perimeter": {
         "label": "Perimeter",
         "unit": "px",
-        "description": "Length of the selected region boundary.",
+        "description": "Length of the selected measurement-region boundary.",
     },
     "bounding_rect": {
         "label": "Bounding rectangle",
@@ -656,12 +705,22 @@ MEASUREMENT_METADATA = {
     "fit_ellipse": {
         "label": "Fit ellipse",
         "unit": "px; degrees for angle",
-        "description": "Major axis, minor axis, and angle of the fitted ellipse.",
+        "description": "Major axis, minor axis, and angle fitted to the selected measurement region.",
     },
     "feret": {
         "label": "Feret's diameter",
         "unit": "px; degrees for angle",
-        "description": "Maximum and minimum caliper widths of the region, with orientation and starting coordinates.",
+        "description": "Caliper measurements for the selected measurement region.",
+    },
+    "circularity": {
+        "label": "Circularity",
+        "unit": "unitless",
+        "description": "Four pi times area divided by perimeter squared for the selected measurement region.",
+    },
+    "solidity": {
+        "label": "Solidity",
+        "unit": "0-1",
+        "description": "Region area divided by convex-hull area for the selected measurement region.",
     },
     "raw_intden": {
         "label": "Integrated density",
@@ -676,72 +735,182 @@ MEASUREMENT_METADATA = {
     "skewness": {
         "label": "Skewness",
         "unit": "unitless",
-        "description": "Asymmetry of the pixel-intensity distribution, measured by Fiji.",
+        "description": "Asymmetry of the pixel-intensity distribution in the selected measurement region.",
     },
     "kurtosis": {
         "label": "Kurtosis",
         "unit": "unitless",
-        "description": "Tail weight of the pixel-intensity distribution, measured by Fiji.",
+        "description": "Tail weight of the pixel-intensity distribution in the selected measurement region.",
     },
     "cell_area": {
-        "label": "Whole-cell area",
+        "label": "Area",
         "unit": "px²",
         "description": "Area enclosed by each Cellpose cell mask.",
     },
-    "cell_perimeter": {
-        "label": "Whole-cell perimeter",
-        "unit": "px",
-        "description": "Boundary length of each Cellpose cell mask.",
-    },
     "cell_mean": {
-        "label": "Whole-cell mean intensity",
+        "label": "Mean gray value",
         "unit": "a.u.",
         "description": "Average measured-channel intensity inside each Cellpose cell.",
     },
+    "cell_std_dev": {
+        "label": "Standard deviation",
+        "unit": "a.u.",
+        "description": "Sample standard deviation of measured-channel intensities inside each Cellpose cell; blank for cells containing fewer than two pixels.",
+    },
+    "cell_mode": {
+        "label": "Modal gray value",
+        "unit": "a.u.",
+        "description": "Most frequent measured-channel pixel value inside each Cellpose cell; ties use the lowest value.",
+    },
     "cell_min_max": {
-        "label": "Whole-cell min & max intensity",
+        "label": "Min & max gray value",
         "unit": "a.u.",
         "description": "Lowest and highest measured-channel intensity inside each Cellpose cell.",
     },
+    "cell_centroid": {
+        "label": "Centroid",
+        "unit": "px",
+        "description": "Geometric center of each Cellpose cell in zero-based pixel coordinates.",
+    },
+    "cell_center_of_mass": {
+        "label": "Center of mass",
+        "unit": "px",
+        "description": "Measured-channel-intensity-weighted center of each Cellpose cell; blank when the intensity sum is zero.",
+    },
+    "cell_perimeter": {
+        "label": "Perimeter",
+        "unit": "px",
+        "description": "Boundary length of each Cellpose cell mask.",
+    },
+    "cell_bounding_rect": {
+        "label": "Bounding rectangle",
+        "unit": "px",
+        "description": "Zero-based bounding-box position and size for each Cellpose cell.",
+    },
+    "cell_fit_ellipse": {
+        "label": "Fit ellipse",
+        "unit": "px; degrees for angle",
+        "description": "Major axis, minor axis, and orientation of the equivalent ellipse for each Cellpose cell.",
+    },
+    "cell_feret": {
+        "label": "Feret's diameter",
+        "unit": "px; degrees for angle",
+        "description": "Maximum caliper diameter of each Cellpose cell.",
+    },
+    "cell_circularity": {
+        "label": "Circularity",
+        "unit": "unitless",
+        "description": "Four pi times area divided by perimeter squared for each Cellpose cell.",
+    },
+    "cell_solidity": {
+        "label": "Solidity",
+        "unit": "0-1",
+        "description": "Cell area divided by convex-hull area for each Cellpose cell.",
+    },
     "cell_median": {
-        "label": "Whole-cell median intensity",
+        "label": "Median",
         "unit": "a.u.",
         "description": "Median measured-channel intensity inside each Cellpose cell.",
     },
     "cell_raw_intden": {
-        "label": "Whole-cell integrated density",
+        "label": "Integrated density",
         "unit": "intensity × px²",
         "description": "Sum of measured-channel pixel intensities inside each Cellpose cell.",
     },
+    "cell_skewness": {
+        "label": "Skewness",
+        "unit": "unitless",
+        "description": "Bias-corrected skewness of measured-channel intensities inside each Cellpose cell; blank when undefined.",
+    },
+    "cell_kurtosis": {
+        "label": "Kurtosis",
+        "unit": "unitless",
+        "description": "Bias-corrected excess kurtosis of measured-channel intensities inside each Cellpose cell; blank when undefined.",
+    },
     "positive_area_in_cell": {
-        "label": "Mask area inside cells",
+        "label": "Area",
         "unit": "px²",
         "description": "Area where the selected mask overlaps each Cellpose cell.",
     },
     "mean_in_positive_area": {
-        "label": "Mean intensity inside mask",
+        "label": "Mean gray value",
         "unit": "a.u.",
         "description": "Average measured-channel intensity where the selected mask overlaps each cell.",
     },
     "std_dev_in_positive_area": {
-        "label": "Standard deviation inside mask",
+        "label": "Standard deviation",
         "unit": "a.u.",
         "description": "Sample standard deviation of measured-channel intensities where the mask overlaps each cell; blank for fewer than two pixels.",
     },
+    "mode_in_positive_area": {
+        "label": "Modal gray value",
+        "unit": "a.u.",
+        "description": "Most frequent measured-channel pixel value where the configured mask overlaps each Cellpose cell; ties use the lowest value.",
+    },
     "min_max_in_positive_area": {
-        "label": "Min & max intensity inside mask",
+        "label": "Min & max gray value",
         "unit": "a.u.",
         "description": "Lowest and highest measured-channel intensity where the selected mask overlaps each cell.",
     },
+    "centroid_in_positive_area": {
+        "label": "Centroid",
+        "unit": "px",
+        "description": "Geometric center of the configured-mask region inside each Cellpose cell in zero-based pixel coordinates.",
+    },
+    "center_of_mass_in_positive_area": {
+        "label": "Center of mass",
+        "unit": "px",
+        "description": "Measured-channel-intensity-weighted center of the configured-mask region inside each Cellpose cell; blank when the intensity sum is zero.",
+    },
+    "perimeter_in_positive_area": {
+        "label": "Perimeter",
+        "unit": "px",
+        "description": "Boundary length of the configured-mask region inside each Cellpose cell.",
+    },
+    "bounding_rect_in_positive_area": {
+        "label": "Bounding rectangle",
+        "unit": "px",
+        "description": "Zero-based bounding-box position and size of the configured-mask region inside each Cellpose cell.",
+    },
+    "fit_ellipse_in_positive_area": {
+        "label": "Fit ellipse",
+        "unit": "px; degrees for angle",
+        "description": "Major axis, minor axis, and orientation of the equivalent ellipse for the configured-mask region inside each Cellpose cell.",
+    },
+    "feret_in_positive_area": {
+        "label": "Feret's diameter",
+        "unit": "px; degrees for angle",
+        "description": "Maximum caliper diameter of the configured-mask region inside each Cellpose cell.",
+    },
+    "circularity_in_positive_area": {
+        "label": "Circularity",
+        "unit": "unitless",
+        "description": "Four pi times area divided by perimeter squared for the configured-mask region inside each Cellpose cell.",
+    },
+    "solidity_in_positive_area": {
+        "label": "Solidity",
+        "unit": "0-1",
+        "description": "Region area divided by convex-hull area for the configured-mask region inside each Cellpose cell.",
+    },
     "median_in_positive_area": {
-        "label": "Median intensity inside mask",
+        "label": "Median",
         "unit": "a.u.",
         "description": "Median measured-channel intensity where the selected mask overlaps each cell.",
     },
     "raw_intden_in_cell": {
-        "label": "Mask integrated density",
+        "label": "Integrated density",
         "unit": "intensity × px²",
         "description": "Sum of measured-channel pixel intensities inside the selected mask and cell.",
+    },
+    "skewness_in_positive_area": {
+        "label": "Skewness",
+        "unit": "unitless",
+        "description": "Bias-corrected skewness of measured-channel intensities in the configured-mask region inside each Cellpose cell; blank when undefined.",
+    },
+    "kurtosis_in_positive_area": {
+        "label": "Kurtosis",
+        "unit": "unitless",
+        "description": "Bias-corrected excess kurtosis of measured-channel intensities in the configured-mask region inside each Cellpose cell; blank when undefined.",
     },
 }
 
@@ -791,6 +960,8 @@ def default_image_definition(index: int) -> dict:
         "cell_group_mask_source": "",
         "analysis_cell_segmentation_enabled": False,
         "analysis_cell_segmentation_source": name,
+        "analysis_cellpose_mask_sources": [],
+        "analysis_cellpose_mask_source": "",
         "cell_diameter": DEFAULT_CELL_DIAMETER,
         "cell_min_size": DEFAULT_CELL_MIN_SIZE,
         "cellprob_threshold": DEFAULT_CELLPROB_THRESHOLD,

@@ -753,7 +753,7 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
                 else:
                     roi_status.setText(
                         "This tab does not create a mask yet. Choose a Weka .model classifier. "
-                        "To measure cells without this mask, enable Cellpose for the channel."
+                        "To measure cells without this mask, configure and select a reusable Cellpose mask."
                     )
 
             def inspect_selected_classifier(
@@ -947,7 +947,7 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
             mask_names = [img["name"].strip() or "Image" for img in active_defs if image_produces_mask(img)]
 
             overlay_names = list(mask_names)
-            overlay_names.append("Whole cell mask")
+            overlay_names.append("Cellpose whole-cell mask")
 
             self._set_listwidget_items_with_selection(
                 self.overlay_roi_list,

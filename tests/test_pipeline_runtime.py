@@ -293,6 +293,26 @@ def test_pipeline_validation_rejects_invalid_cellpose_and_mask_sources(tmp_path:
     with pytest.raises(ValueError, match="Cellpose source channel"):
         validate_config(cfg)
 
+
+def test_pipeline_validation_rejects_conflicting_settings_for_one_shared_cellpose_mask(tmp_path: Path):
+    cfg = make_native_config(tmp_path)
+    first = cfg.measurement_targets[0]
+    first.do_cell_segmentation = True
+    first.cell_segmentation_source = "image1"
+    first.cell_segmentation_mask_source = "image1"
+    cfg.images.append(ImageDef("image2", "Reference", "Reference", None))
+    second = MeasurementTarget(
+        source_image_key="image2",
+        do_cell_segmentation=True,
+        cell_segmentation_source="image1",
+        cell_segmentation_mask_source="image1",
+        cell_diameter=99,
+    )
+    cfg.measurement_targets.append(second)
+
+    with pytest.raises(ValueError, match="conflicting segmentation settings"):
+        validate_config(cfg)
+
     cfg = make_native_config(tmp_path / "second")
     cfg.measurement_targets[0].per_cell_mask_source = "missing"
     with pytest.raises(ValueError, match="Per-cell mask source"):
@@ -303,7 +323,7 @@ def test_pipeline_validation_rejects_whole_cell_overlay_without_segmentation(tmp
     cfg = make_native_config(tmp_path)
     cfg.measurement_targets[0].overlay_whole_cell_mask = True
 
-    with pytest.raises(ValueError, match="requires whole-cell segmentation"):
+    with pytest.raises(ValueError, match="requires Cellpose segmentation"):
         validate_config(cfg)
 
 

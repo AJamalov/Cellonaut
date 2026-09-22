@@ -61,7 +61,7 @@ def test_format_configuration_summary_text_uses_structured_summary():
     assert "All measured channels: area, mean" in text
     assert "Detected: 2 | Ready: 2 | Blocked: 0" in text
     assert "[OK] Input folder: 2 supported image files found." in text
-    assert "GFP: source=Brightfield, diameter=30" in text
+    assert "GFP_Cellpose: source=Brightfield, diameter=30" in text
     assert "remove border=No" in text
     assert "GFP group: cell conditions=Area:50-" in text
     assert "exclude from CSV=Yes" in text

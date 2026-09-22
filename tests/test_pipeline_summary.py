@@ -292,7 +292,7 @@ def test_configured_fingerprints_preserve_roles_deduplicate_and_include_custom_m
         {"role": "classifier:Cell", "path": str(shared), "exists": True, "token": "same-path"},
         {"role": "classifier:Tubules", "path": str(shared), "exists": True, "token": "same-path"},
         {"role": "cellpose_custom_model:default", "path": str(shared), "exists": True, "token": "same-path"},
-        {"role": "cellpose_custom_model:image1", "path": str(shared), "exists": True, "token": "same-path"},
+        {"role": "cellpose_custom_model:image1:image1", "path": str(shared), "exists": True, "token": "same-path"},
     ]
 
 
@@ -329,7 +329,7 @@ def test_cellpose_model_settings_exact_default_override_and_disabled_contract(tm
             "gpu_passed_to_cellpose": True,
         },
         {
-            "scope": "target:image1",
+            "scope": "target:image1:image1",
             "model_type": "custom",
             "custom_model_path": "target.model",
             "diameter": 31,
@@ -373,6 +373,8 @@ def test_effective_measurement_target_settings_complete_exact_contract(tmp_path:
         "overlay_whole_cell_mask": True,
         "do_cell_segmentation": True,
         "cell_segmentation_source": "image1",
+        "cell_segmentation_mask_source": "image1",
+        "output_variant": "",
         "per_cell_mask_source": "image1_class1",
         "measurement_options": {"area": True},
         "cell_diameter": 42,

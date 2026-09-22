@@ -671,6 +671,8 @@ def save_cellpose_montage_for_sample(
     extra_overlay_masks: dict[str, np.ndarray],
     export_dir: Path,
     result_id: str,
+    output_variant: str = "",
+    cell_mask_key: str = "",
     log_func: Callable[[str], None],
 ) -> Path | None:
     labels = extra_overlay_masks.get("__whole_cell_mask__")
@@ -698,13 +700,21 @@ def save_cellpose_montage_for_sample(
         tiles.append(("CSV-excluded cell groups", flagged_arr.astype(np.uint8) * 255))
         tiles.append(("Flagged overlay", _overlay_mask(raw_arr, flagged_arr)))
 
+    variant_suffix = f"_{_safe_name(output_variant)}" if str(output_variant or "").strip() else ""
     out_file = (
         export_dir
         / _safe_name(result_id)
-        / f"{_safe_name(result_id)}_{_safe_name(getattr(source_def, 'label', 'Cellpose'))}_cellpose_montage.png"
+        / f"{_safe_name(result_id)}_{_safe_name(getattr(source_def, 'label', 'Cellpose'))}{variant_suffix}_cellpose_montage.png"
     )
     saved_path = save_montage_png(tiles, out_file)
     if saved_path is not None:
-        record_artifact(saved_path, sample=result_id, target=str(getattr(source_def, "key", source_def.label)), label=source_def.label, kind="montage")
+        record_artifact(
+            saved_path,
+            sample=result_id,
+            target=str(getattr(source_def, "key", source_def.label)),
+            label=source_def.label,
+            kind="montage",
+            cell_mask=cell_mask_key,
+        )
         log_func(f"[{result_id}] Saved Cellpose montage: {saved_path.name}")
     return saved_path

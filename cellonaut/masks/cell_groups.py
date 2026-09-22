@@ -57,7 +57,11 @@ def _preparation_key(settings: dict[str, Any]) -> tuple[str, str, str]:
     source = "Cell mask image" if settings.get("mask_qc_intensity_source") == "Cell mask image" else "Measured image"
     channel = str(settings.get("name", "") or "")
     if source == "Cell mask image":
-        channel = str(settings.get("analysis_cell_segmentation_source", "") or channel)
+        channel = str(
+            settings.get("analysis_cellpose_mask_source", "")
+            or settings.get("analysis_cell_segmentation_source", "")
+            or channel
+        )
     return mask, source, channel
 
 

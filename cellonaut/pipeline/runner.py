@@ -64,6 +64,11 @@ class _TargetBatchResult:
         return any(row.status not in {"PROCESSED", "SKIPPED"} for row in self.statuses)
 
 
+def _target_run_name(target: TargetConfig) -> str:
+    variant = str(getattr(target, "output_variant", "") or "").strip()
+    return f"{target.source_image_key} / {variant}" if variant else target.source_image_key
+
+
 def _execute_measurement_target(
     *,
     sample_folder: Path,
@@ -100,6 +105,7 @@ def _target_status_row(
     run_type: str,
     sample_id: str,
     target_name: str,
+    cell_mask: str,
     status: str,
     context: SampleProcessingContext | None,
     reason: str,
@@ -112,6 +118,7 @@ def _target_status_row(
         sample_id=sample_id,
         target=target_name,
         status=status,
+        cell_mask=cell_mask,
         source_image_file=str(file_map.get(target_name) or ""),
         reason=reason,
     )
@@ -148,14 +155,16 @@ def _process_targets_in_context(
             progress_func(int((target_index - 1) * 100 / total_targets))
 
         target_name = target.source_image_key
-        logger(target_message(target_name))
+        cell_mask = str(getattr(target, "cell_segmentation_mask_source", "") or "")
+        display_target = _target_run_name(target)
+        logger(target_message(display_target))
         outcome = _execute_measurement_target(
             sample_folder=sample_folder,
             cfg=cfg,
             target=target,
             context=context,
             logger=logger,
-            error_message=error_message(target_name),
+            error_message=error_message(display_target),
             should_cancel=should_cancel,
         )
         result.statuses.append(
@@ -163,6 +172,7 @@ def _process_targets_in_context(
                 run_type=run_type,
                 sample_id=sample_label,
                 target_name=target_name,
+                cell_mask=cell_mask,
                 status=outcome.status,
                 context=context,
                 reason=outcome.reason,
@@ -170,7 +180,7 @@ def _process_targets_in_context(
         )
 
         if outcome.status == "PROCESSED":
-            result.processed_targets.append(target_name)
+            result.processed_targets.append(display_target)
             if outcome.row is not None:
                 result.rows.append(outcome.row)
         elif outcome.status == "SKIPPED" and skipped_message is not None:
@@ -229,7 +239,9 @@ def _log_full_run_configuration(
         logger(
             f"  - measured_channel={target.source_image_key}, overlay_base={target.overlay_base_image_key or '(measured channel)'}, "
             f"masks={target.overlay_roi_keys or []}, cell_masks={target.do_cell_segmentation}, "
+            f"cell_mask={getattr(target, 'cell_segmentation_mask_source', '') or '(measured channel)'}, "
             f"cell_mask_source={target.cell_segmentation_source or '(measured channel)'}, "
+            f"output_variant={getattr(target, 'output_variant', '') or '(none)'}, "
             f"show_cell_mask={target.overlay_whole_cell_mask}"
         )
     logger("Run defaults (per-target execution settings are recorded in the pipeline summary):")
@@ -398,17 +410,21 @@ def _execute_full_run_samples(
             results.failed += 1
             prepared.logger(f"[SAMPLE ERROR] {sample_name}: {exc}")
             reason = f"{type(exc).__name__}: {exc}"
-            reported_targets = {row.target for row in results.sample_statuses if row.sample_id == sample_name}
+            reported_targets = {
+                (row.target, row.cell_mask) for row in results.sample_statuses if row.sample_id == sample_name
+            }
             # A context-creation failure has no target rows of its own. Fill
             # only missing rows so already-recorded target outcomes survive.
             for target in prepared.enabled_targets:
-                if target.source_image_key in reported_targets:
+                cell_mask = str(getattr(target, "cell_segmentation_mask_source", "") or "")
+                if (target.source_image_key, cell_mask) in reported_targets:
                     continue
                 results.sample_statuses.append(
                     _target_status_row(
                         run_type="full",
                         sample_id=sample_name,
                         target_name=target.source_image_key,
+                        cell_mask=cell_mask,
                         status="FAILED",
                         context=None,
                         reason=reason,
@@ -708,7 +724,7 @@ def run_preview_pipeline(
     preview_overlay_labels: list[str] = []
     if preview_targets:
         first_processed_key = preview_targets[0]
-        first_target = next(target for target in enabled_targets if target.source_image_key == first_processed_key)
+        first_target = next(target for target in enabled_targets if _target_run_name(target) == first_processed_key)
         try:
             first_base_def = get_image_def(cfg, first_target.overlay_base_image_key or first_target.source_image_key)
             preview_overlay_labels.append(first_base_def.label)
@@ -722,7 +738,7 @@ def run_preview_pipeline(
                 preview_overlay_labels.append(key)
 
         if first_target.do_cell_segmentation and first_target.overlay_whole_cell_mask:
-            preview_overlay_labels.append("Whole cell mask")
+            preview_overlay_labels.append("Cellpose whole-cell mask")
 
     return {
         "preview_log": str(preview_logfile),

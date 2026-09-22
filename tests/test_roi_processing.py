@@ -250,6 +250,7 @@ def test_measure_roi_stats_uses_pixel_calibration_and_restores_image_metadata(mo
         AREA = 1
         MEAN = 2
         INTEGRATED_DENSITY = 4
+        SHAPE_DESCRIPTORS = 8
 
     class FakeResultsTable:
         def __init__(self):
@@ -289,7 +290,15 @@ def test_measure_roi_stats_uses_pixel_calibration_and_restores_image_metadata(mo
         def measure(self):
             assert isinstance(self.image.calibration, FakeCalibration)
             assert self.image.calibration.unit == "pixel"
-            self.table.values.update({"Area": 4.0, "Mean": 3.0, "RawIntDen": 12.0})
+            self.table.values.update(
+                {
+                    "Area": 4.0,
+                    "Mean": 3.0,
+                    "RawIntDen": 12.0,
+                    "Circ.": 0.75,
+                    "Solidity": 0.9,
+                }
+            )
 
     monkeypatch.setattr(
         "cellonaut.masks.roi_processing.get_java_classes",
@@ -306,6 +315,8 @@ def test_measure_roi_stats_uses_pixel_calibration_and_restores_image_metadata(mo
     assert stats["Area"] == 4.0
     assert stats["Mean"] == 3.0
     assert stats["RawIntDen"] == 12.0
+    assert stats["Circularity"] == 0.75
+    assert stats["Solidity"] == 0.9
     assert image.calibration is original_calibration
     assert isinstance(image.calibration_history[0], FakeCalibration)
     assert image.calibration_history[-1] is original_calibration

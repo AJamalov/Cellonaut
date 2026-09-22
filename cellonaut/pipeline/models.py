@@ -75,6 +75,9 @@ class MeasurementTarget:
 
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_mask_source: str = ""
+    # Non-empty when one measured channel is emitted once per selected Cellpose mask.
+    output_variant: str = ""
     per_cell_mask_source: str = ""
     overlay_whole_cell_mask: bool = False
 
@@ -105,6 +108,8 @@ class ResolvedMeasurementTarget:
     overlay_roi_keys: List[str] = field(default_factory=list)
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_mask_source: str = ""
+    output_variant: str = ""
     per_cell_mask_source: str = ""
     overlay_whole_cell_mask: bool = False
     measurement_options: Dict[str, bool] = field(default_factory=dict)
@@ -154,6 +159,8 @@ class Config:
     overlay_roi_keys: List[str] = field(default_factory=list)
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_mask_source: str = ""
+    output_variant: str = ""
     per_cell_mask_source: str = ""
     overlay_whole_cell_mask: bool = False
 
@@ -179,6 +186,7 @@ class SampleTargetStatus:
     sample_id: str
     target: str
     status: str
+    cell_mask: str = ""
     source_image_file: str = ""
     reason: str = ""
 
@@ -188,6 +196,7 @@ class SampleTargetStatus:
             "sample_id": self.sample_id,
             "target": self.target,
             "status": self.status,
+            "cell_mask": self.cell_mask,
             "source_image_file": self.source_image_file,
             "reason": self.reason,
         }
@@ -221,6 +230,11 @@ def resolve_measurement_target(cfg: Config, target: TargetConfig) -> ResolvedMea
             target.cell_segmentation_source or target.source_image_key
             if target.do_cell_segmentation else target.cell_segmentation_source
         ),
+        cell_segmentation_mask_source=(
+            target.cell_segmentation_mask_source or target.source_image_key
+            if target.do_cell_segmentation else target.cell_segmentation_mask_source
+        ),
+        output_variant=target.output_variant,
         per_cell_mask_source=target.per_cell_mask_source,
         overlay_whole_cell_mask=target.overlay_whole_cell_mask,
         measurement_options=deepcopy(cfg.measurement_options if target.measurement_options is None else target.measurement_options),

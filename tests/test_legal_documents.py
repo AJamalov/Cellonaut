@@ -47,7 +47,7 @@ def test_public_documentation_stays_end_user_focused():
         "### Verify Windows downloads",
         "## First Analysis",
         "## Important Limitations",
-        "## Version 1.0.0 Highlights",
+        "## Version 1.0.1 Highlights",
     ):
         assert removed_section not in readme
 
@@ -82,7 +82,7 @@ def test_source_notice_identifies_release_location_and_copyleft_sources():
     assert "BUNDLED_COMPONENTS.md" in notice
     assert "ImageScience is not" in notice
     assert "redistributed" in notice
-    assert "Cellonaut-1.0.0-corresponding-sources.zip" in notice
+    assert "Cellonaut-1.0.1-corresponding-sources.zip" in notice
     assert "corresponding_sources prepare" in notice
     for component in ("Qt", "PySide", "Fiji", "Bio-Formats", "Trainable Weka", "fastremap", "fill-voids"):
         assert component in notice

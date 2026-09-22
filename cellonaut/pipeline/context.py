@@ -68,6 +68,7 @@ class SampleProcessingContext:
     roi_measure_img_map: dict[str, Any]
     skeleton_metrics: dict[str, int]
     native_numpy_images: bool
+    cellpose_label_cache: dict[str, Any] = field(default_factory=dict)
     runtime: PipelineRuntime = field(default_factory=PipelineRuntime)
     _closed: bool = field(default=False, init=False, repr=False)
 

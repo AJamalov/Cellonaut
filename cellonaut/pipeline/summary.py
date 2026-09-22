@@ -152,9 +152,17 @@ def _configured_file_fingerprints(cfg: Any) -> list[dict[str, Any]]:
 
     add(getattr(cfg, "cellpose_custom_model_path", ""), "cellpose_custom_model:default")
     for target in getattr(cfg, "measurement_targets", []) or []:
+        mask_key = (
+            getattr(target, "cell_segmentation_mask_source", "")
+            or getattr(target, "source_image_key", "")
+            if bool(getattr(target, "do_cell_segmentation", False))
+            else ""
+        )
         add(
             getattr(target, "cellpose_custom_model_path", ""),
-            f"cellpose_custom_model:{getattr(target, 'source_image_key', '')}",
+            "cellpose_custom_model:"
+            f"{getattr(target, 'source_image_key', '')}:"
+            f"{mask_key}",
         )
 
     return fingerprints
@@ -181,7 +189,10 @@ def _cellpose_model_settings(cfg: Any) -> list[dict[str, Any]]:
         effective = config_for_measurement_target(cfg, target)
         settings.append(
             {
-                "scope": f"target:{getattr(target, 'source_image_key', '')}",
+                "scope": (
+                    f"target:{getattr(target, 'source_image_key', '')}:"
+                    f"{effective.cell_segmentation_mask_source}"
+                ),
                 "model_type": effective.cellpose_model_type,
                 "custom_model_path": effective.cellpose_custom_model_path,
                 "diameter": effective.cell_diameter,
@@ -206,6 +217,8 @@ def _effective_measurement_target_settings(cfg: Any, target: Any) -> dict[str, A
         "overlay_whole_cell_mask": bool(effective.overlay_whole_cell_mask),
         "do_cell_segmentation": bool(effective.do_cell_segmentation),
         "cell_segmentation_source": effective.cell_segmentation_source,
+        "cell_segmentation_mask_source": effective.cell_segmentation_mask_source,
+        "output_variant": effective.output_variant,
         "per_cell_mask_source": effective.per_cell_mask_source,
         "measurement_options": dict(effective.measurement_options or {}),
         "cell_diameter": effective.cell_diameter,

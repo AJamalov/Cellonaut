@@ -111,7 +111,9 @@ class CellonautGuiProcessingSettingsMixin(
 
     # A row remains relevant when either cell segmentation or any mask relationship uses it.
     def analysis_row_has_active_mask(self, image_def: dict) -> bool:
-        if bool(image_def.get("analysis_cell_segmentation_enabled", False)):
+        if list(image_def.get("analysis_cellpose_mask_sources", []) or []):
+            return True
+        if str(image_def.get("analysis_cellpose_mask_source", "") or "").strip():
             return True
         relationships = dict(image_def.get("mask_relationships", {}) or {})
         return any(bool(value) for value in relationships.values())

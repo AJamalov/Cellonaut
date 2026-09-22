@@ -80,19 +80,55 @@ def summarize_per_cell_table(
             if not math.isnan(value):
                 summary[out_key] = value
 
+    # Ellipse orientation is axial: 1 degree and 179 degrees are close, not opposite.
+    def _axial_mean_if_present(src_col: str, out_key: str):
+        if src_col not in df.columns:
+            return
+        values = cast(pd.Series, pd.to_numeric(pd.Series(df[src_col], index=df.index), errors="coerce"))
+        values = values.dropna()
+        if values.empty:
+            return
+        doubled_radians = [math.radians(float(value) * 2.0) for value in values]
+        mean_sine = sum(math.sin(value) for value in doubled_radians) / len(doubled_radians)
+        mean_cosine = sum(math.cos(value) for value in doubled_radians) / len(doubled_radians)
+        if math.isclose(mean_sine, 0.0, abs_tol=1e-15) and math.isclose(
+            mean_cosine, 0.0, abs_tol=1e-15
+        ):
+            return
+        summary[out_key] = (math.degrees(math.atan2(mean_sine, mean_cosine)) / 2.0) % 180.0
+
     _sum_if_present("CellArea", f"{cell_prefix}_PerCell_TotalCellArea")
     _sum_if_present("CellPerimeter", f"{cell_prefix}_PerCell_TotalCellPerimeter")
     _mean_if_present("CellMean", f"{cell_prefix}_PerCell_MeanOfCellMeans")
+    _mean_if_present("CellStdDev", f"{cell_prefix}_PerCell_MeanOfCellStdDevs")
+    _mean_if_present("CellMode", f"{cell_prefix}_PerCell_MeanOfCellModes")
     _extreme_if_present("CellMin", f"{cell_prefix}_PerCell_MinimumCellIntensity", maximum=False)
     _extreme_if_present("CellMax", f"{cell_prefix}_PerCell_MaximumCellIntensity", maximum=True)
+    _mean_if_present("CellCentroidX", f"{cell_prefix}_PerCell_MeanCellCentroidX")
+    _mean_if_present("CellCentroidY", f"{cell_prefix}_PerCell_MeanCellCentroidY")
+    _mean_if_present("CellCenterOfMassX", f"{cell_prefix}_PerCell_MeanCellCenterOfMassX")
+    _mean_if_present("CellCenterOfMassY", f"{cell_prefix}_PerCell_MeanCellCenterOfMassY")
+    _mean_if_present("CellBoundingRectX", f"{cell_prefix}_PerCell_MeanCellBoundingRectX")
+    _mean_if_present("CellBoundingRectY", f"{cell_prefix}_PerCell_MeanCellBoundingRectY")
+    _mean_if_present("CellBoundingRectWidth", f"{cell_prefix}_PerCell_MeanCellBoundingRectWidth")
+    _mean_if_present("CellBoundingRectHeight", f"{cell_prefix}_PerCell_MeanCellBoundingRectHeight")
+    _mean_if_present("CellEllipseMajor", f"{cell_prefix}_PerCell_MeanCellEllipseMajor")
+    _mean_if_present("CellEllipseMinor", f"{cell_prefix}_PerCell_MeanCellEllipseMinor")
+    _axial_mean_if_present("CellEllipseAngle", f"{cell_prefix}_PerCell_MeanCellEllipseAngle")
+    _mean_if_present("CellFeret", f"{cell_prefix}_PerCell_MeanCellFeretDiameter")
+    _mean_if_present("CellCircularity", f"{cell_prefix}_PerCell_MeanCellCircularity")
+    _mean_if_present("CellSolidity", f"{cell_prefix}_PerCell_MeanCellSolidity")
     _mean_if_present("CellMedian", f"{cell_prefix}_PerCell_MeanOfCellMedians")
     _sum_if_present("CellIntDen", f"{cell_prefix}_PerCell_SumCellIntDen")
+    _mean_if_present("CellSkewness", f"{cell_prefix}_PerCell_MeanCellSkewness")
+    _mean_if_present("CellKurtosis", f"{cell_prefix}_PerCell_MeanCellKurtosis")
     _mean_if_present("CellCorrectedMean", f"{cell_prefix}_PerCell_MeanOfCellCorrectedMeans")
     _sum_if_present("CellCorrectedIntDen", f"{cell_prefix}_PerCell_SumCellCorrectedIntDen")
 
     _sum_if_present(f"{organelle_label}Area_InCell", f"{mask_prefix}_PerCell_TotalMaskArea")
     _mean_if_present(f"{organelle_label}Mean_InCell", f"{mask_prefix}_PerCell_MeanOfMaskMeans")
     _mean_if_present(f"{organelle_label}StdDev_InCell", f"{mask_prefix}_PerCell_MeanOfMaskStdDevs")
+    _mean_if_present(f"{organelle_label}Mode_InCell", f"{mask_prefix}_PerCell_MeanOfMaskModes")
     _extreme_if_present(
         f"{organelle_label}Min_InCell",
         f"{mask_prefix}_PerCell_MinimumMaskIntensity",
@@ -104,7 +140,54 @@ def summarize_per_cell_table(
         maximum=True,
     )
     _mean_if_present(f"{organelle_label}Median_InCell", f"{mask_prefix}_PerCell_MeanOfMaskMedians")
+    _mean_if_present(f"{organelle_label}CentroidX_InCell", f"{mask_prefix}_PerCell_MeanMaskCentroidX")
+    _mean_if_present(f"{organelle_label}CentroidY_InCell", f"{mask_prefix}_PerCell_MeanMaskCentroidY")
+    _mean_if_present(
+        f"{organelle_label}CenterOfMassX_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskCenterOfMassX",
+    )
+    _mean_if_present(
+        f"{organelle_label}CenterOfMassY_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskCenterOfMassY",
+    )
+    _sum_if_present(f"{organelle_label}Perimeter_InCell", f"{mask_prefix}_PerCell_TotalMaskPerimeter")
+    _mean_if_present(
+        f"{organelle_label}BoundingRectX_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskBoundingRectX",
+    )
+    _mean_if_present(
+        f"{organelle_label}BoundingRectY_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskBoundingRectY",
+    )
+    _mean_if_present(
+        f"{organelle_label}BoundingRectWidth_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskBoundingRectWidth",
+    )
+    _mean_if_present(
+        f"{organelle_label}BoundingRectHeight_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskBoundingRectHeight",
+    )
+    _mean_if_present(
+        f"{organelle_label}EllipseMajor_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskEllipseMajor",
+    )
+    _mean_if_present(
+        f"{organelle_label}EllipseMinor_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskEllipseMinor",
+    )
+    _axial_mean_if_present(
+        f"{organelle_label}EllipseAngle_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskEllipseAngle",
+    )
+    _mean_if_present(f"{organelle_label}Feret_InCell", f"{mask_prefix}_PerCell_MeanMaskFeretDiameter")
+    _mean_if_present(
+        f"{organelle_label}Circularity_InCell",
+        f"{mask_prefix}_PerCell_MeanMaskCircularity",
+    )
+    _mean_if_present(f"{organelle_label}Solidity_InCell", f"{mask_prefix}_PerCell_MeanMaskSolidity")
     _sum_if_present(f"{organelle_label}IntDen_InCell", f"{mask_prefix}_PerCell_SumIntDen")
+    _mean_if_present(f"{organelle_label}Skewness_InCell", f"{mask_prefix}_PerCell_MeanMaskSkewness")
+    _mean_if_present(f"{organelle_label}Kurtosis_InCell", f"{mask_prefix}_PerCell_MeanMaskKurtosis")
     _mean_if_present(
         f"{organelle_label}CorrectedMean_InCell",
         f"{mask_prefix}_PerCell_MeanOfCorrectedMaskMeans",

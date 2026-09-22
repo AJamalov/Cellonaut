@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from cellonaut.gui.mixin import GuiMixin
+from cellonaut.config.relationships import cellpose_intensity_source_name
 from cellonaut.masks.cell_groups import evaluate_cell_groups
 from cellonaut.masks.cell_qc import find_matching_cell_qc_column
 from cellonaut.masks.preview_filter_overlay import (
@@ -432,8 +433,22 @@ class CellonautGuiPreviewFilterMixin(GuiMixin):
         from cellonaut.results.artifacts import ArtifactResolver, current_layer_labels
 
         resolver = ArtifactResolver.load(Path(self.preview_state.file_path or ""))
+        artifact_cell_mask_label = ""
         if resolver is not None:
             labels = current_layer_labels({"layer_labels": labels, "layer_keys": self.preview_state.current_layer_keys}, self.get_active_image_definitions())
+            try:
+                preview_record = resolver.record(Path(self.preview_state.file_path or ""))
+                cell_mask_key = str(preview_record.get("cell_mask", "") or "")
+                artifact_cell_mask_label = next(
+                    (
+                        str(definition.get("name", "") or "")
+                        for index, definition in enumerate(self.get_active_image_definitions(), 1)
+                        if str(definition.get("key", "") or f"image{index}") == cell_mask_key
+                    ),
+                    "",
+                )
+            except Exception:
+                artifact_cell_mask_label = ""
         roles = list(self.preview_state.current_layer_roles or [])
         if stack is None or getattr(stack, "ndim", 0) != 5 or not labels:
             if image_def.get("mask_qc_intensity_source") == "Cell mask image":
@@ -446,7 +461,13 @@ class CellonautGuiPreviewFilterMixin(GuiMixin):
         intensity_source = str(image_def.get("mask_qc_intensity_source", "Measured image") or "Measured image")
         if intensity_source == "Cell mask image":
             measured_label = self._preview_filter_label_key(
-                str(image_def.get("analysis_cell_segmentation_source", "") or image_def.get("name", ""))
+                cellpose_intensity_source_name(
+                    image_def,
+                    self.get_active_image_definitions()
+                    if hasattr(self, "get_active_image_definitions")
+                    else [image_def],
+                    artifact_cell_mask_label,
+                )
             )
 
         mask_index = next(

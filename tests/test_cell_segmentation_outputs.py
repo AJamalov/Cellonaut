@@ -18,11 +18,13 @@ from cellonaut.cell_segmentation.core import (
     run_cell_segmentation_on_image,
     run_cellpose_segmentation,
 )
+from cellonaut.config.defaults import CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS
 from cellonaut.masks import cellpose as cellpose_pipeline
 from cellonaut.masks.cellpose import (
     build_cell_segmentation_cfg_from_pipeline,
     selected_whole_cell_measurements,
 )
+from cellonaut.measurement.math import summarize_per_cell_table
 
 
 def test_cellpose_diagnostic_outputs_are_always_enabled(monkeypatch):
@@ -76,6 +78,63 @@ def test_selected_whole_cell_measurements_use_the_measured_channel():
     assert first["CellMax"] == 6
     assert first["CellMedian"] == 4
     assert second["CellMedian"] == 5
+
+
+def test_selected_whole_cell_measurements_expose_extended_native_statistics():
+    labels = np.array(
+        [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 2, 2], [0, 0, 2, 2]],
+        dtype=np.int32,
+    )
+    intensity = np.array(
+        [[1, 2, 0, 0], [3, 4, 0, 0], [0, 0, 2, 2], [0, 0, 4, 4]],
+        dtype=float,
+    )
+    extended_keys = {
+        "cell_std_dev", "cell_mode", "cell_centroid", "cell_center_of_mass",
+        "cell_bounding_rect", "cell_fit_ellipse", "cell_feret", "cell_circularity",
+        "cell_solidity", "cell_skewness", "cell_kurtosis",
+    }
+
+    measured = selected_whole_cell_measurements(
+        labels,
+        intensity,
+        {key: True for key in extended_keys},
+    )
+
+    assert measured.columns.tolist() == [
+        "CellID", "CellStdDev", "CellMode", "CellCentroidX", "CellCentroidY",
+        "CellCenterOfMassX", "CellCenterOfMassY", "CellBoundingRectX", "CellBoundingRectY",
+        "CellBoundingRectWidth", "CellBoundingRectHeight", "CellEllipseMajor", "CellEllipseMinor",
+        "CellEllipseAngle", "CellFeret", "CellCircularity", "CellSolidity", "CellSkewness",
+        "CellKurtosis",
+    ]
+    first = measured.loc[measured["CellID"] == 1].iloc[0]
+    assert first["CellStdDev"] == pytest.approx(np.std([1, 2, 3, 4], ddof=1))
+    assert first["CellMode"] == 1
+    assert first["CellCentroidX"] == 0.5
+    assert first["CellCentroidY"] == 0.5
+    assert first["CellCenterOfMassX"] == pytest.approx(0.6)
+    assert first["CellCenterOfMassY"] == pytest.approx(0.7)
+    assert first[["CellBoundingRectX", "CellBoundingRectY"]].tolist() == [0.0, 0.0]
+    assert first[["CellBoundingRectWidth", "CellBoundingRectHeight"]].tolist() == [2.0, 2.0]
+    assert first["CellEllipseMajor"] == pytest.approx(2.0)
+    assert first["CellEllipseMinor"] == pytest.approx(2.0)
+    assert first["CellFeret"] == pytest.approx(np.sqrt(5))
+    assert first["CellCircularity"] == pytest.approx(np.pi)
+    assert first["CellSolidity"] == 1
+    assert first["CellSkewness"] == pytest.approx(0.0)
+    assert first["CellKurtosis"] == pytest.approx(-1.2)
+
+
+def test_whole_cell_center_of_mass_is_blank_for_zero_intensity_cells():
+    measured = selected_whole_cell_measurements(
+        np.ones((2, 2), dtype=np.int32),
+        np.zeros((2, 2), dtype=float),
+        {"cell_center_of_mass": True},
+    )
+
+    assert np.isnan(cast(float, measured.loc[0, "CellCenterOfMassX"]))
+    assert np.isnan(cast(float, measured.loc[0, "CellCenterOfMassY"]))
 
 
 def test_pipeline_cellpose_settings_obey_installed_cpu_choice(monkeypatch):
@@ -179,6 +238,8 @@ def test_cellpose_pipeline_keeps_original_measurements_unfiltered(monkeypatch, t
     assert row["Cell_CellCount"] == 2
     assert not any("QC" in key for key in row)
     assert row == {
+        "CellposeMaskKey": "cell",
+        "CellposeMaskLabel": "Cell",
         "Cell_CellCount": 2,
         "Cell_measured_with_Cell_cellpose_mask_PerCell_TotalCellArea": 5.0,
         "Cell_measured_with_Cell_cellpose_mask_PerCell_MeanOfCellMeans": 3.0,
@@ -450,6 +511,63 @@ def test_per_cell_export_honors_metric_choices_in_table_and_summary(tmp_path: Pa
     assert "MaskMax_InCell" in saved.columns
     assert "MaskMedian_InCell" in saved.columns
     assert not any("Fraction" in column or "Ratio" in column for column in saved.columns)
+
+
+def test_configured_mask_within_cells_supports_the_complete_measurement_set(tmp_path: Path):
+    labels = np.array(
+        [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 2, 2], [0, 0, 2, 2]],
+        dtype=np.int32,
+    )
+    intensity = np.array(
+        [[1, 2, 0, 0], [3, 4, 0, 0], [0, 0, 2, 2], [0, 0, 4, 4]],
+        dtype=float,
+    )
+    output = tmp_path / "all_mask_within_cell_measurements.csv"
+
+    biology, _geometry = export_per_cell_organelle_signal_tables(
+        cell_label_img=labels,
+        organelle_mask=labels > 0,
+        intensity_img=intensity,
+        out_biology_csv=output,
+        organelle_prefix="Mask",
+        measurement_options={key: True for key in CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS},
+    )
+
+    expected_columns = {
+        "MaskArea_InCell", "MaskMean_InCell", "MaskStdDev_InCell", "MaskMode_InCell",
+        "MaskMin_InCell", "MaskMax_InCell", "MaskCentroidX_InCell", "MaskCentroidY_InCell",
+        "MaskCenterOfMassX_InCell", "MaskCenterOfMassY_InCell", "MaskPerimeter_InCell",
+        "MaskBoundingRectX_InCell", "MaskBoundingRectY_InCell", "MaskBoundingRectWidth_InCell",
+        "MaskBoundingRectHeight_InCell", "MaskEllipseMajor_InCell", "MaskEllipseMinor_InCell",
+        "MaskEllipseAngle_InCell", "MaskFeret_InCell", "MaskCircularity_InCell",
+        "MaskSolidity_InCell", "MaskIntDen_InCell", "MaskMedian_InCell",
+        "MaskSkewness_InCell", "MaskKurtosis_InCell",
+    }
+    assert expected_columns.issubset(biology.columns)
+    expected_saved_columns = (expected_columns - {"MaskMean_InCell"}) | {
+        "MaskMeanGrayValue_InCell"
+    }
+    assert expected_saved_columns.issubset(pd.read_csv(output).columns)
+
+    first = biology.loc[biology["CellID"] == 1].iloc[0]
+    assert first["MaskArea_InCell"] == 4
+    assert first["MaskMean_InCell"] == 2.5
+    assert first["MaskMode_InCell"] == 1
+    assert first["MaskCenterOfMassX_InCell"] == pytest.approx(0.6)
+    assert first["MaskCenterOfMassY_InCell"] == pytest.approx(0.7)
+    assert first["MaskFeret_InCell"] == pytest.approx(np.sqrt(5))
+    assert first["MaskCircularity_InCell"] == pytest.approx(np.pi)
+    assert first["MaskSolidity_InCell"] == 1
+    assert first["MaskSkewness_InCell"] == pytest.approx(0.0)
+    assert first["MaskKurtosis_InCell"] == pytest.approx(-1.2)
+
+    summary = summarize_per_cell_table(biology, "Mask", "GFP", "DIA")
+    prefix = "GFP_measured_with_Mask_mask_PerCell"
+    assert summary[f"{prefix}_TotalMaskArea"] == 8
+    assert summary[f"{prefix}_TotalMaskPerimeter"] == pytest.approx(8)
+    assert summary[f"{prefix}_MeanOfMaskModes"] == pytest.approx(1.5)
+    assert summary[f"{prefix}_MeanMaskCircularity"] == pytest.approx(np.pi)
+    assert summary[f"{prefix}_MeanMaskSolidity"] == 1
 
 
 def test_export_cell_segmentation_diagnostics_writes_roi_outline_csv_when_enabled(tmp_path: Path):

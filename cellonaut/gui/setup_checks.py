@@ -230,7 +230,7 @@ def _measurement_check_items(
         measurement = _setup_row(
             "BLOCKED",
             "Measurements",
-            "No measurements are selected. Turn ON a channel/mask pair in Measurements or enable Cellpose for a channel.",
+            "No measurements are selected. Turn ON a configured-mask or Cellpose-mask intersection in Measurements.",
         )
     warning_check = _setup_row(
         "WARNING" if warnings else "OK",
@@ -337,13 +337,13 @@ def format_configuration_summary_text(summary: dict[str, Any]) -> str:
     cellpose_rows = summary.get("cell_segmentation", []) or []
     for item in cellpose_rows:
         lines.append(
-            f"- {item.get('source', '')}: source={item.get('seg_source', '')}, "
+            f"- {item.get('source', '')}_Cellpose: source={item.get('seg_source', '')}, "
             f"diameter={item.get('diameter', '')}, minimum cell area={item.get('min_size', '')}, "
             f"probability threshold={item.get('cellprob', '')}, flow threshold={item.get('flow', '')}, "
             f"remove border={'Yes' if item.get('remove_border', True) else 'No'}"
         )
     if not cellpose_rows:
-        lines.append("Cellpose is not enabled for any measured channel.")
+        lines.append("No reusable Cellpose masks are configured.")
 
     lines.extend(["", "Cell Groups", "-" * 72])
     group_rows = summary.get("filters", []) or []

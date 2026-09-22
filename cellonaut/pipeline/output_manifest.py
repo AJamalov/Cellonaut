@@ -212,7 +212,9 @@ def save_run_manifest(
             f"- {_display_source_key(source_key, image_labels)} ({source_key}) | "
             f"enabled={target.get('enabled', '')} | masks={mask_labels} | "
             f"cell_masks={target.get('do_cell_segmentation', False)} | "
-            f"cell_source={_display_source_key(target.get('cell_segmentation_source', ''), image_labels) or '(none)'}"
+            f"cell_mask={_display_source_key(target.get('cell_segmentation_mask_source', ''), image_labels) or '(none)'}, "
+            f"cell_source={_display_source_key(target.get('cell_segmentation_source', ''), image_labels) or '(none)'}, "
+            f"output_variant={target.get('output_variant', '') or '(none)'}"
         )
     if not manifest["measurement_targets"]:
         lines.append("(none)")
@@ -228,6 +230,9 @@ def save_run_manifest(
         sample = status.get("sample_id", "") or "(unknown sample)"
         target_key = str(status.get("target", "") or "")
         target_label = _display_source_key(target_key, image_labels) or "(all targets)"
+        cell_mask_key = str(status.get("cell_mask", "") or "")
+        if cell_mask_key:
+            target_label += f" / {_display_source_key(cell_mask_key, image_labels)}_Cellpose"
         reason = str(status.get("reason", "") or "").strip()
         line = f"- {sample} | {target_label} | {status.get('status', '')}"
         if reason:

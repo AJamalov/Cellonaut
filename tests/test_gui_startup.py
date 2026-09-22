@@ -304,8 +304,9 @@ def test_main_window_starts_and_closes_offscreen(monkeypatch):
         assert "mask source(s)" in window.images_section.summary_label.text()
         assert not hasattr(window, "analysis_measurements_button")
         assert window.analysis_measurements_panel.isHidden() is False
-        assert window.analysis_whole_cell_measurement_checks_host.title() == "Whole-cell measurements"
-        assert window.analysis_cell_measurement_checks_host.title() == "Mask inside each cell"
+        assert window.analysis_basic_measurement_checks_host.title() == "Configured-mask measurements"
+        assert window.analysis_whole_cell_measurement_checks_host.title() == "Cellpose whole-cell measurements"
+        assert window.analysis_cell_measurement_checks_host.title() == "Configured mask within Cellpose cells"
         assert not hasattr(window, "analysis_output_measurement_checks_host")
         assert window.images_group.isHidden() is False
         assert not hasattr(window, "channels_waiting_label")
@@ -1762,7 +1763,7 @@ def test_runtime_status_summarizes_application_versions(monkeypatch, tmp_path):
     window = CellonautMainWindow()
     try:
         html = window.runtime_installation_summary_html(str(tmp_path / "Fiji.app"))
-        assert "Cellonaut 1.0.0" in html
+        assert "Cellonaut 1.0.1" in html
         assert "Cellpose:</b>" in html
         assert "PyTorch:</b>" in html
         assert "Installation:" not in html

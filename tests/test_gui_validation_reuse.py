@@ -84,7 +84,7 @@ def test_mask_inside_cell_choice_warns_without_assigned_mask():
     )
     gui.measurement_options = {"positive_area_in_cell": True}
 
-    assert "no measurement mask is assigned" in " ".join(gui.get_analysis_matrix_warnings())
+    assert "no Weka or combined mask is assigned" in " ".join(gui.get_analysis_matrix_warnings())
 
 
 def test_whole_cell_choice_requires_cellpose_but_not_an_assigned_mask():

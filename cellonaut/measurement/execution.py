@@ -183,6 +183,8 @@ def measure_rois_for_source(
         )
         write_stat_group("fit_ellipse", ["EllipseMajor", "EllipseMinor", "EllipseAngle"])
         write_stat_group("feret", ["Feret", "FeretX", "FeretY", "FeretAngle", "MinFeret"])
+        write_stat_group("circularity", ["Circularity"])
+        write_stat_group("solidity", ["Solidity"])
 
         if is_measurement_enabled(cfg, "raw_intden", True):
             write_measurement("RawIntDen", int_den)

@@ -254,7 +254,7 @@ def existing_cellpose_label_status(
     targets: Sequence[TargetConfig],
     result_id: str,
 ) -> Dict[str, bool]:
-    """Report reusable Cellpose labels keyed by their measured source channel."""
+    """Report reusable Cellpose labels keyed by their reusable mask owner."""
 
     results_dir = mask_source_results_dir(cfg)
     status: Dict[str, bool] = {}
@@ -262,14 +262,17 @@ def existing_cellpose_label_status(
     for target in targets:
         if not target.do_cell_segmentation:
             continue
+        mask_key = target.cell_segmentation_mask_source or target.source_image_key
+        if mask_key in status:
+            continue
         try:
-            source_def = get_image_def(cfg, target.source_image_key)
+            source_def = get_image_def(cfg, mask_key)
         except ValueError:
             continue
         try:
-            status[target.source_image_key] = saved_cell_labels(results_dir, result_id, target.source_image_key, source_def.label).is_file()
+            status[mask_key] = saved_cell_labels(results_dir, result_id, mask_key, source_def.label).is_file()
         except ArtifactMetadataError:
-            status[target.source_image_key] = False
+            status[mask_key] = False
     return status
 
 
@@ -375,31 +378,36 @@ def _reusable_cellpose_warnings(
 ) -> List[str]:
     warnings: List[str] = []
     cellpose_status = existing_cellpose_label_status(cfg, targets, result_id)
+    checked_mask_keys: set[str] = set()
     for target in targets:
         if not target.do_cell_segmentation:
             continue
-        if cellpose_status.get(target.source_image_key, False):
+        mask_key = target.cell_segmentation_mask_source or target.source_image_key
+        if mask_key in checked_mask_keys:
+            continue
+        checked_mask_keys.add(mask_key)
+        if cellpose_status.get(mask_key, False):
             try:
                 source_def = get_image_def(
                     cfg,
                     target.cell_segmentation_source or target.source_image_key,
                 )
                 expected_shape = inspector.image_shape(source_def)
-                measured_def = get_image_def(cfg, target.source_image_key)
-                label_path = saved_cell_labels(results_dir, result_id, target.source_image_key, measured_def.label)
+                mask_def = get_image_def(cfg, mask_key)
+                label_path = saved_cell_labels(results_dir, result_id, mask_key, mask_def.label)
                 if expected_shape is not None:
                     label_shape = inspector.saved_shape(label_path)
                     if label_shape != expected_shape:
                         warnings.append(
                             f"Reusable Cellpose label shape mismatch for "
-                            f"{measured_def.label}: labels {label_shape}, "
+                            f"{mask_def.label}: labels {label_shape}, "
                             f"image {expected_shape}. File: {label_path}"
                         )
             except Exception as exc:
-                warnings.append(f"Could not validate reusable Cellpose labels for " f"{target.source_image_key}: {exc}")
+                warnings.append(f"Could not validate reusable Cellpose labels for " f"{mask_key}: {exc}")
             continue
         try:
-            source_def = get_image_def(cfg, target.source_image_key)
+            source_def = get_image_def(cfg, mask_key)
         except ValueError:
             continue
         expected = f"{result_id}_{source_def.label}_01_cellpose_labels.tif"

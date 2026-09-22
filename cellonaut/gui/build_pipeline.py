@@ -229,8 +229,8 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         self.cellpose_settings_group = self.make_section("Cellpose")
 
         cellpose_note = QLabel(
-            "Each row is a channel whose per-cell results will be measured.\n" \
-            "Enable Cellpose in that row, then choose the image channel Cellpose should use to find the cells."
+            "Each enabled row creates one reusable Channel_Cellpose mask column in Measurements.\n"
+            "Choose the image channel Cellpose should use to find cells; any measured channel can reuse that mask."
         )
         cellpose_note.setWordWrap(True)
         cellpose_note.setProperty("muted", "true")
@@ -253,7 +253,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
 
     def _build_analysis_matrix_panel(self) -> tuple[QWidget, QVBoxLayout]:
 
-        self.analysis_mask_relationships_label = QLabel("Measured channels and masks")
+        self.analysis_mask_relationships_label = QLabel("Measured channels and regions")
         self.analysis_mask_relationships_label.setProperty("uiRole", "sectionTitle")
 
         self.analysis_matrix_table = QTableWidget()
@@ -276,8 +276,8 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         analysis_matrix_inner_layout.addWidget(self.analysis_mask_relationships_label)
         self.analysis_matrix_hint_label = QLabel(
             "Measured channels are in rows.\n"
-            "Masks that are used for measurement are in columns.\n"
-            "Turn ON or OFF the channel/mask pairs that you wish to measure by clicking on the buttons in the matrix."
+            "Configured masks and reusable Channel_Cellpose masks are in columns.\n"
+            "Turn ON any masks you want to measure. Cellpose columns can be shared across rows or combined on one row."
         )
         self.analysis_matrix_hint_label.setWordWrap(True)
         self.analysis_matrix_hint_label.setProperty("muted", "true")
@@ -311,14 +311,14 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         self.analysis_measurements_hint.setProperty("uiRole", "mutedLabel")
         measurements_panel_layout.addWidget(self.analysis_measurements_hint)
 
-        self.analysis_basic_measurement_checks_host = QGroupBox("Region measurements")
+        self.analysis_basic_measurement_checks_host = QGroupBox("Configured-mask measurements")
         self.analysis_basic_measurement_checks_layout = QGridLayout(self.analysis_basic_measurement_checks_host)
         self.analysis_basic_measurement_checks_layout.setContentsMargins(10, 8, 10, 10)
         self.analysis_basic_measurement_checks_layout.setHorizontalSpacing(14)
         self.analysis_basic_measurement_checks_layout.setVerticalSpacing(4)
         measurements_panel_layout.addWidget(self.analysis_basic_measurement_checks_host)
 
-        self.analysis_whole_cell_measurement_checks_host = QGroupBox("Whole-cell measurements")
+        self.analysis_whole_cell_measurement_checks_host = QGroupBox("Cellpose whole-cell measurements")
         self.analysis_whole_cell_measurement_checks_layout = QGridLayout(
             self.analysis_whole_cell_measurement_checks_host
         )
@@ -327,7 +327,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         self.analysis_whole_cell_measurement_checks_layout.setVerticalSpacing(4)
         measurements_panel_layout.addWidget(self.analysis_whole_cell_measurement_checks_host)
 
-        self.analysis_cell_measurement_checks_host = QGroupBox("Mask inside each cell")
+        self.analysis_cell_measurement_checks_host = QGroupBox("Configured mask within Cellpose cells")
         self.analysis_cell_measurement_checks_layout = QGridLayout(self.analysis_cell_measurement_checks_host)
         self.analysis_cell_measurement_checks_layout.setContentsMargins(10, 8, 10, 10)
         self.analysis_cell_measurement_checks_layout.setHorizontalSpacing(14)
@@ -546,7 +546,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         filter_tables_row.setContentsMargins(0, 0, 0, 0)
         filter_tables_row.setSpacing(12)
 
-        self.analysis_cell_filter_host = QGroupBox("Cell measurements")
+        self.analysis_cell_filter_host = QGroupBox("Cellpose cell measurements")
         self.analysis_cell_filter_host.setProperty("previewToolSection", "true")
         cell_filter_host_layout = QVBoxLayout(self.analysis_cell_filter_host)
         cell_filter_host_layout.setContentsMargins(10, 8, 10, 10)
@@ -554,7 +554,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         cell_shape_group = QGroupBox("Cell shape and size")
         self.analysis_cell_shape_filter_layout = QGridLayout(cell_shape_group)
         cell_filter_host_layout.addWidget(cell_shape_group)
-        cell_intensity_group = QGroupBox("Whole-cell intensity")
+        cell_intensity_group = QGroupBox("Cellpose whole-cell intensity")
         cell_intensity_layout = QVBoxLayout(cell_intensity_group)
         self.analysis_cell_intensity_filter_layout = QGridLayout()
         cell_intensity_layout.addLayout(self.analysis_cell_intensity_filter_layout)
@@ -1155,7 +1155,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         self.project_section.set_summary(f"{setup_summary} · {channel_count} channel(s)")
         self.images_section.set_summary(f"{mask_count} mask source(s)")
         self.cellpose_settings_section.set_summary(
-            f"Enabled for {cellpose_count} channel(s)" if cellpose_count else "Cell segmentation disabled"
+            f"{cellpose_count} reusable mask(s) configured" if cellpose_count else "Cell segmentation disabled"
         )
         self.image_processing_section.set_summary(
             f"{image_step_count} before masks · {mask_step_count} after masks · "

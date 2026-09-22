@@ -1,6 +1,6 @@
 # Bundled and Optional Components
 
-Bundled components in the Cellonaut 1.0.0 Windows release:
+Bundled components in the Cellonaut 1.0.1 Windows release:
 
 | Component | Included version | Source and terms |
 | --- | --- | --- |

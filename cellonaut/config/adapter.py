@@ -519,6 +519,11 @@ def _build_measurement_targets(
         for image in parsed.definitions
         if image.model_path is not None or image.combined_mask_source_keys
     }
+    physical_images_by_name = {
+        image.name.strip(): (index, image)
+        for index, image in enumerate(images)
+        if not image.is_mask_only and image.mask_source_mode.strip() != MASK_SOURCE_MODE_COMBINED
+    }
     targets: list[MeasurementTarget] = []
     for index, image in enumerate(images):
         if image.is_mask_only or image.mask_source_mode.strip() == MASK_SOURCE_MODE_COMBINED:
@@ -538,34 +543,49 @@ def _build_measurement_targets(
             else (selected_masks[0] if selected_masks else "")
         )
         per_cell_mask_source = roi_label_to_key[cell_group_mask] if cell_group_mask else ""
-        do_cell_segmentation = image.analysis_cell_segmentation_enabled
-        model_type = normalize_cellpose_model_type(image.cellpose_model_type)
-        custom_model_path = image.cellpose_custom_model_path.strip()
-        if do_cell_segmentation and not custom_model_path and model_type not in CELLPOSE_MODEL_OPTIONS:
-            raise ValueError(
-                f"Cellpose model for channel or mask '{source_name}' must be one of: "
-                f"{', '.join(CELLPOSE_MODEL_OPTIONS)}."
-            )
-        if do_cell_segmentation and custom_model_path:
-            custom_model_file = Path(custom_model_path)
-            if not custom_model_file.is_file() and not reuse_existing_masks:
+        cellpose_mask_names = list(image.analysis_cellpose_mask_sources)
+        if not cellpose_mask_names and image.analysis_cellpose_mask_source.strip():
+            cellpose_mask_names = [image.analysis_cellpose_mask_source.strip()]
+        target_mask_names = cellpose_mask_names or [""]
+        for cellpose_mask_name in target_mask_names:
+            provider_entry = physical_images_by_name.get(cellpose_mask_name)
+            provider_index, provider = provider_entry if provider_entry is not None else (index, image)
+            do_cell_segmentation = bool(provider_entry and provider.analysis_cell_segmentation_enabled)
+            model_type = normalize_cellpose_model_type(provider.cellpose_model_type)
+            custom_model_path = provider.cellpose_custom_model_path.strip()
+            if do_cell_segmentation and not custom_model_path and model_type not in CELLPOSE_MODEL_OPTIONS:
                 raise ValueError(
-                    f"Custom Cellpose model file does not exist for channel or mask '{source_name}':\n"
-                    f"{custom_model_file}"
+                    f"Cellpose model for channel or mask '{cellpose_mask_name}' must be one of: "
+                    f"{', '.join(CELLPOSE_MODEL_OPTIONS)}."
                 )
-        if not (overlay_roi_keys or per_cell_mask_source or do_cell_segmentation):
-            continue
+            if do_cell_segmentation and custom_model_path:
+                custom_model_file = Path(custom_model_path)
+                if not custom_model_file.is_file() and not reuse_existing_masks:
+                    raise ValueError(
+                        f"Custom Cellpose model file does not exist for channel or mask '{cellpose_mask_name}':\n"
+                        f"{custom_model_file}"
+                    )
+            if not (overlay_roi_keys or per_cell_mask_source or do_cell_segmentation):
+                continue
 
-        numbers = parsed.cell_numbers[index]
-        targets.append(
-            MeasurementTarget(
+            numbers = parsed.cell_numbers[provider_index]
+            targets.append(MeasurementTarget(
                 source_image_key=source_key,
                 overlay_base_image_key=source_key,
                 overlay_roi_keys=overlay_roi_keys,
                 do_cell_segmentation=do_cell_segmentation,
-                cell_segmentation_source=label_to_key.get(
-                    image.analysis_cell_segmentation_source or source_name, source_key
+                cell_segmentation_source=(
+                    label_to_key.get(
+                        provider.analysis_cell_segmentation_source or cellpose_mask_name,
+                        label_to_key.get(cellpose_mask_name, source_key),
+                    )
+                    if do_cell_segmentation
+                    else ""
                 ),
+                cell_segmentation_mask_source=(
+                    label_to_key.get(cellpose_mask_name, source_key) if do_cell_segmentation else ""
+                ),
+                output_variant=(f"{cellpose_mask_name}_Cellpose" if len(cellpose_mask_names) > 1 else ""),
                 per_cell_mask_source=per_cell_mask_source,
                 overlay_whole_cell_mask=do_cell_segmentation,
                 measurement_options=dict(measurement_options),
@@ -574,16 +594,15 @@ def _build_measurement_targets(
                 cell_use_gpu=True,
                 cellprob_threshold=float(numbers["cellprob_threshold"]),
                 flow_threshold=float(numbers["flow_threshold"]),
-                cell_remove_border=image.cell_remove_border,
+                cell_remove_border=provider.cell_remove_border,
                 cellpose_model_type=model_type,
                 cellpose_custom_model_path=custom_model_path,
                 cell_mask_adjustments=_mask_adjustments(
-                    image.cell_mask_adjustments,
+                    provider.cell_mask_adjustments,
                     field_name="Cell mask adjustment",
-                    image_name=source_name,
+                    image_name=cellpose_mask_name,
                 ),
-            )
-        )
+            ))
     return targets
 
 
