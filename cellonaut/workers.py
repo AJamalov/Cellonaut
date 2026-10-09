@@ -98,8 +98,8 @@ ERROR_HINTS = [
     ),
     UserErrorHint(
         SetupErrorCode.CELL_SOURCE,
-        "Cellpose source channel is invalid.",
-        "The selected Cellpose source channel no longer exists in the current channel list.",
+        "A Cellpose input channel is invalid.",
+        "One of the selected Cellpose input channels no longer exists in the current channel list.",
         (
             "Open Cellpose masks.",
             "Choose one of the configured channels as the cell mask source.",

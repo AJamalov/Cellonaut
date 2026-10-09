@@ -45,6 +45,51 @@ class CellonautGuiDatasetMixin(
     CellonautGuiDatasetAnalysisMixin,
     CellonautGuiDatasetImagesMixin,
 ):
+    CELLPOSE_UNUSED_CHANNEL = "(none)"
+
+    def make_cellpose_input_channels_cell(
+        self,
+        names: list[str],
+        selected: list[str],
+    ) -> QWidget:
+        """Create three ordered channel selectors matching Cellpose 4's input."""
+        cell = QWidget()
+        cell.setProperty("uiRole", "matrixActionCell")
+        layout = QHBoxLayout(cell)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(3)
+        selected = list(dict.fromkeys(value for value in selected if value in names))[:3]
+        if not selected and names:
+            selected = [names[0]]
+        for slot in range(3):
+            combo = NoWheelComboBox()
+            combo.setProperty("cellposeInputSlot", slot)
+            combo.addItems(names if slot == 0 else [self.CELLPOSE_UNUSED_CHANNEL, *names])
+            value = selected[slot] if slot < len(selected) else self.CELLPOSE_UNUSED_CHANNEL
+            index = combo.findText(value)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+            combo.setToolTip(
+                f"Cellpose input channel {slot + 1}. Channel order is preserved; "
+                "unused trailing channels should remain '(none)'."
+            )
+            combo.currentTextChanged.connect(self.on_cellpose_settings_table_changed)
+            layout.addWidget(combo, 1)
+        return cell
+
+    def cellpose_input_channels_from_cell(self, cell: QWidget | None) -> list[str]:
+        if cell is None:
+            return []
+        combos = sorted(
+            cell.findChildren(QComboBox),
+            key=lambda combo: int(combo.property("cellposeInputSlot") or 0),
+        )
+        values = [
+            combo.currentText().strip()
+            for combo in combos
+            if combo.currentText().strip() and combo.currentText().strip() != self.CELLPOSE_UNUSED_CHANNEL
+        ]
+        return list(dict.fromkeys(values))[:3]
+
     def make_cellpose_custom_model_cell(self, value: object) -> QWidget:
         cell = QWidget()
         cell.setProperty("uiRole", "matrixActionCell")
@@ -136,7 +181,7 @@ class CellonautGuiDatasetMixin(
         headers = [
             "Enable",
             "Remove border",
-            "Cellpose source channel",
+            "Cellpose input channels (ordered)",
             "Cellpose model",
             "Custom model",
             "Diameter (px)",
@@ -152,7 +197,7 @@ class CellonautGuiDatasetMixin(
         header_help = [
             "Create one reusable Cellpose mask for this channel. It becomes a Channel_Cellpose column in Measurements.",
             "Leave out partial cells that touch the image boundary.",
-            "Image channel Cellpose uses to find cell boundaries; it may differ from the measured row.",
+            "One to three ordered image channels supplied to Cellpose. The first channel is also used for cell QC intensity.",
             "Built-in Cellpose model used for segmentation.",
             "Optional compatible Cellpose 4 model file; this overrides the built-in model.",
             "Cell diameter in pixels used for rescaling. Blank keeps the original image scale.",
@@ -164,7 +209,7 @@ class CellonautGuiDatasetMixin(
             header_item = table.horizontalHeaderItem(column)
             if header_item is not None:
                 header_item.setToolTip(tooltip)
-        minimum_widths = [68, 96, 136, 112, 140, 82, 126, 126, 104]
+        minimum_widths = [68, 96, 330, 112, 140, 82, 126, 126, 104]
         header_metrics = table.horizontalHeader().fontMetrics()
         for column, (header_text, minimum_width) in enumerate(zip(headers, minimum_widths, strict=True)):
             table.setColumnWidth(column, max(minimum_width, header_metrics.horizontalAdvance(header_text) + 28))
@@ -189,18 +234,16 @@ class CellonautGuiDatasetMixin(
             remove_border_cb.clicked.connect(self.on_cellpose_settings_table_changed)
             table.setCellWidget(row_idx, 1, remove_border_cb)
 
-            seg_source_combo = NoWheelComboBox()
-            seg_source_combo.addItems(names)
-            seg_source_value = str(image_def.get("analysis_cell_segmentation_source", names[row_idx]) or names[row_idx])
-            idx = seg_source_combo.findText(seg_source_value)
-            seg_source_combo.setCurrentIndex(idx if idx >= 0 else row_idx)
-            seg_source_combo.setToolTip(
-                "Channel used to create the Cellpose cell mask.\n\n"
-                "Cell filter values such as area, mean intensity, and raw integrated density are measured on this channel, "
-                "even when the measured channel is different."
+            selected_sources = list(image_def.get("analysis_cell_segmentation_sources", []) or [])
+            if not selected_sources:
+                selected_sources = [
+                    str(image_def.get("analysis_cell_segmentation_source", names[row_idx]) or names[row_idx])
+                ]
+            table.setCellWidget(
+                row_idx,
+                2,
+                self.make_cellpose_input_channels_cell(names, selected_sources),
             )
-            seg_source_combo.currentTextChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 2, seg_source_combo)
 
             model_combo = NoWheelComboBox()
             model_combo.addItems(CELLPOSE_MODEL_OPTIONS)
@@ -309,12 +352,11 @@ class CellonautGuiDatasetMixin(
             if rb_cb is not None:
                 image_def["cell_remove_border"] = bool(rb_cb.isChecked())
 
-            seg_source_combo = table.cellWidget(row_idx, 2)
-            image_def["analysis_cell_segmentation_source"] = (
-                seg_source_combo.currentText()
-                if seg_source_combo is not None
-                else str(image_def.get("analysis_cell_segmentation_source", ""))
-            )
+            segmentation_sources = self.cellpose_input_channels_from_cell(table.cellWidget(row_idx, 2))
+            if not segmentation_sources:
+                segmentation_sources = [str(image_def.get("name", "") or "").strip()]
+            image_def["analysis_cell_segmentation_sources"] = segmentation_sources
+            image_def["analysis_cell_segmentation_source"] = segmentation_sources[0]
 
             model_combo = table.cellWidget(row_idx, 3)
             image_def["cellpose_model_type"] = (

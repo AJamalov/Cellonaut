@@ -97,23 +97,27 @@ def clear_cellpose_model_cache() -> None:
 
 
 def normalize_for_cellpose(img: np.ndarray) -> np.ndarray:
-    """Normalize integer or floating-point image data for Cellpose inference."""
+    """Convert to finite float32 without changing Cellpose's intensity scale.
 
-    img = np.asarray(img)
+    Cellpose performs its own percentile normalization. Dividing a low-range
+    uint16 acquisition by 65535 first can make its percentile span smaller than
+    Cellpose's 1e-3 flat-image guard, erasing otherwise valid spinning-disk data.
+    """
 
-    if np.issubdtype(img.dtype, np.integer):
-        info = np.iinfo(img.dtype)
-        if info.max > 0:
-            img = img.astype(np.float32) / float(info.max)
-        else:
-            img = img.astype(np.float32)
-    else:
-        img = img.astype(np.float32)
-        maxv = np.nanmax(img)
-        if maxv > 0:
-            img = img / maxv
+    prepared = np.asarray(img, dtype=np.float32)
+    if np.isfinite(prepared).all():
+        return prepared
 
-    return np.nan_to_num(img, nan=0.0, posinf=1.0, neginf=0.0)
+    finite = prepared[np.isfinite(prepared)]
+    finite_min = float(np.min(finite)) if finite.size else 0.0
+    finite_max = float(np.max(finite)) if finite.size else 0.0
+    return np.nan_to_num(
+        prepared,
+        copy=False,
+        nan=0.0,
+        posinf=finite_max,
+        neginf=finite_min,
+    )
 
 
 def normalize_to_uint8_display(img: np.ndarray) -> np.ndarray:
@@ -204,16 +208,42 @@ def run_cellpose_segmentation(
         )
         log_func(f"{backend.label}: {backend.detail}")
 
-    if img_norm.ndim != 2 and not (img_norm.ndim == 3 and img_norm.shape[-1] == 3):
+    if img_norm.ndim != 2 and not (img_norm.ndim == 3 and img_norm.shape[-1] in (2, 3)):
         raise ValueError(f"Unsupported image shape for Cellpose: {img_norm.shape}")
 
-    masks, _, _ = model.eval(
+    masks, flows, _ = model.eval(
         img_norm,
         diameter=cfg.diameter,
-        min_size=cfg.min_size,
+        # Keep candidate labels until Cellonaut's explicit cleanup stage so the
+        # log can distinguish model recognition from minimum-area filtering.
+        min_size=0,
         cellprob_threshold=cfg.cellprob_threshold,
         flow_threshold=cfg.flow_threshold,
+        channel_axis=-1 if img_norm.ndim == 3 else None,
     )
+    if log_func:
+        channel_view = img_norm[..., None] if img_norm.ndim == 2 else img_norm
+        statistics = []
+        for index in range(channel_view.shape[-1]):
+            channel = channel_view[..., index]
+            p1, p50, p99 = np.nanpercentile(channel, (1.0, 50.0, 99.0))
+            statistics.append(f"c{index + 1}:p1={p1:.6g},p50={p50:.6g},p99={p99:.6g}")
+        log_func("Cellpose input statistics: " + " | ".join(statistics))
+        try:
+            cellprob = np.asarray(flows[2])
+            finite = cellprob[np.isfinite(cellprob)]
+            if finite.size:
+                above = int(np.count_nonzero(finite > cfg.cellprob_threshold))
+                log_func(
+                    "Cellpose response: "
+                    f"cellprob_min={float(np.min(finite)):.4g}; "
+                    f"cellprob_median={float(np.median(finite)):.4g}; "
+                    f"cellprob_max={float(np.max(finite)):.4g}; "
+                    f"pixels_above_threshold={above}"
+                )
+        except (IndexError, TypeError, ValueError):
+            pass
+        log_func(f"Cellpose candidate labels before minimum-area cleanup: {int(np.max(masks)) if np.size(masks) else 0}")
     device_type = getattr(getattr(model, "device", None), "type", None)
     if isinstance(device_type, str):
         if runtime is not None:
@@ -245,6 +275,20 @@ def filter_labels_by_size(label_img: np.ndarray, min_size: int) -> np.ndarray:
 
     if label_img.max() == 0:
         return np.zeros_like(label_img, dtype=np.int32)
+
+    # Match Cellpose's own cleanup (including filling label holes) while keeping
+    # it outside model.eval so candidate counts remain observable.
+    if min_size > 0:
+        try:
+            from cellpose import utils as cellpose_utils
+
+            cleaned = cellpose_utils.fill_holes_and_remove_small_masks(
+                label_img.copy(),
+                min_size=min_size,
+            )
+            return relabel_sequential(np.asarray(cleaned, dtype=np.int32))
+        except (ImportError, AttributeError):
+            pass
 
     props = regionprops_table(label_img, properties=("label", "area"))
     props_df = pd.DataFrame(props)
@@ -1004,13 +1048,19 @@ def run_cell_segmentation_on_image(
 
     check_cancel(should_cancel)
     masks = run_cellpose_segmentation(img, cfg, log_func=log_func, runtime=runtime)
+    if log_func:
+        log_func(f"Cellpose labels before minimum-area cleanup: {int(np.max(masks)) if masks.size else 0}")
 
     check_cancel(should_cancel)
     masks = filter_labels_by_size(masks, cfg.min_size)
+    if log_func:
+        log_func(f"Cellpose labels after minimum-area cleanup: {int(np.max(masks)) if masks.size else 0}")
 
     if cfg.remove_border:
         check_cancel(should_cancel)
         masks = remove_border_labels_fn(masks)
+        if log_func:
+            log_func(f"Cellpose labels after border cleanup: {int(np.max(masks)) if masks.size else 0}")
 
     return masks
 

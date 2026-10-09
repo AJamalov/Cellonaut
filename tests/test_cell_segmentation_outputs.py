@@ -21,7 +21,9 @@ from cellonaut.cell_segmentation.core import (
 from cellonaut.config.defaults import CONFIGURED_MASK_WITHIN_CELLPOSE_KEYS
 from cellonaut.masks import cellpose as cellpose_pipeline
 from cellonaut.masks.cellpose import (
+    build_cellpose_input,
     build_cell_segmentation_cfg_from_pipeline,
+    cellpose_label_cache_key,
     selected_whole_cell_measurements,
 )
 from cellonaut.measurement.math import summarize_per_cell_table
@@ -273,11 +275,94 @@ def test_cellpose_v4_eval_receives_only_supported_arguments(monkeypatch):
     assert captured["shape"] == (4, 5)
     assert captured["kwargs"] == {
         "diameter": 42,
-        "min_size": 15,
+        "min_size": 0,
         "cellprob_threshold": -1.0,
         "flow_threshold": 0.7,
+        "channel_axis": None,
     }
     assert labels.dtype == np.int32
+
+
+def test_cellpose_preserves_low_dynamic_range_uint16_scale(monkeypatch):
+    captured = {}
+
+    class FakeModel:
+        def eval(self, image, **_kwargs):
+            captured["image"] = image.copy()
+            return np.zeros(image.shape[:2], dtype=np.int32), None, None
+
+    monkeypatch.setattr(core, "get_cellpose_model", lambda _cfg: FakeModel())
+    image = np.array([[93, 121], [157, 169]], dtype=np.uint16)
+
+    run_cellpose_segmentation(image, CellSegmentationConfig())
+
+    assert captured["image"].dtype == np.float32
+    np.testing.assert_array_equal(captured["image"], image.astype(np.float32))
+    assert float(np.ptp(captured["image"])) == 76.0
+
+
+@pytest.mark.parametrize("channel_count", [2, 3])
+def test_cellpose_multichannel_input_preserves_order_and_sets_channel_axis(monkeypatch, channel_count):
+    captured = {}
+
+    class FakeModel:
+        def eval(self, image, **kwargs):
+            captured["image"] = image.copy()
+            captured["kwargs"] = kwargs
+            return np.zeros(image.shape[:2], dtype=np.int32), None, None
+
+    monkeypatch.setattr(core, "get_cellpose_model", lambda _cfg: FakeModel())
+    image = np.stack(
+        [np.full((4, 5), value, dtype=np.uint16) for value in range(100, 100 * (channel_count + 1), 100)],
+        axis=-1,
+    )
+
+    labels = run_cellpose_segmentation(image, CellSegmentationConfig())
+
+    assert labels.shape == (4, 5)
+    assert captured["image"].shape == (4, 5, channel_count)
+    assert np.all(captured["image"][..., 0] < captured["image"][..., 1])
+    if channel_count == 3:
+        assert np.all(captured["image"][..., 1] < captured["image"][..., 2])
+    assert captured["kwargs"]["channel_axis"] == -1
+    assert captured["kwargs"]["min_size"] == 0
+
+
+def test_cellpose_input_builder_and_cache_key_include_ordered_channels(monkeypatch):
+    definitions = {
+        key: SimpleNamespace(key=key, label=key.upper())
+        for key in ("bf", "gfp", "rfp")
+    }
+    monkeypatch.setattr(cellpose_pipeline, "get_image_def", lambda _cfg, key: definitions[key])
+    monkeypatch.setattr(cellpose_pipeline, "imageplus_to_numpy_2d", np.asarray)
+    cfg = SimpleNamespace(
+        cell_segmentation_sources=["bf", "gfp", "rfp"],
+        cell_segmentation_source="bf",
+        cell_diameter=30,
+        cell_min_size=15,
+        cellprob_threshold=0.0,
+        flow_threshold=0.4,
+        cell_remove_border=False,
+        cellpose_model_type="cpsam",
+        cellpose_custom_model_path="",
+        cell_mask_adjustments={},
+    )
+    image_map = {
+        "bf": np.full((2, 3), 1, dtype=np.uint16),
+        "gfp": np.full((2, 3), 2, dtype=np.uint16),
+        "rfp": np.full((2, 3), 3, dtype=np.uint16),
+    }
+
+    inference, primary, source_defs = build_cellpose_input(cfg, image_map)
+    first_key = cellpose_label_cache_key(cfg, definitions["bf"])
+    cfg.cell_segmentation_sources = ["gfp", "bf", "rfp"]
+    reordered_key = cellpose_label_cache_key(cfg, definitions["bf"])
+
+    assert inference.shape == (2, 3, 3)
+    assert inference[0, 0].tolist() == [1, 2, 3]
+    assert np.array_equal(primary, image_map["bf"])
+    assert [definition.key for definition in source_defs] == ["bf", "gfp", "rfp"]
+    assert first_key != reordered_key
 
 
 def test_cellpose_run_passes_requested_and_effective_gpu_choice_to_log(monkeypatch):
@@ -303,7 +388,9 @@ def test_cellpose_run_passes_requested_and_effective_gpu_choice_to_log(monkeypat
 
     assert backend_args["acceleration_allowed"] is False
     assert backend_args["acceleration_requested"] is True
-    assert logs == ["Cellpose backend: CPU fallback"]
+    assert logs[0] == "Cellpose backend: CPU fallback"
+    assert any(message.startswith("Cellpose input statistics:") for message in logs)
+    assert logs[-1] == "Cellpose candidate labels before minimum-area cleanup: 0"
 
 
 def test_cellpose_run_logs_actual_inference_device_after_eval(monkeypatch):
@@ -431,10 +518,13 @@ def test_cell_segmentation_cleanup_removes_small_and_border_cells(monkeypatch, r
     )
 
     expected = np.zeros_like(raw_labels)
-    expected[2, 6:9] = 1
-    expected[5:7, 2:5] = 2
-    if not remove_border:
-        expected[0, 6:10] = 3
+    if remove_border:
+        expected[2, 6:9] = 1
+        expected[5:7, 2:5] = 2
+    else:
+        expected[0, 6:10] = 1
+        expected[2, 6:9] = 2
+        expected[5:7, 2:5] = 3
     np.testing.assert_array_equal(labels, expected)
     np.testing.assert_array_equal(raw_labels, original)
 

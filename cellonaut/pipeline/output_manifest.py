@@ -208,12 +208,20 @@ def save_run_manifest(
         source_key = str(target.get("source_image_key", ""))
         mask_keys = [str(key) for key in target.get("overlay_roi_keys", []) or []]
         mask_labels = [_display_source_key(key, image_labels) for key in mask_keys]
+        cell_source_keys = target.get("cell_segmentation_sources", []) or [
+            target.get("cell_segmentation_source", "")
+        ]
+        cell_source_labels = [
+            _display_source_key(str(key), image_labels)
+            for key in cell_source_keys
+            if str(key)
+        ] or ["(none)"]
         lines.append(
             f"- {_display_source_key(source_key, image_labels)} ({source_key}) | "
             f"enabled={target.get('enabled', '')} | masks={mask_labels} | "
             f"cell_masks={target.get('do_cell_segmentation', False)} | "
             f"cell_mask={_display_source_key(target.get('cell_segmentation_mask_source', ''), image_labels) or '(none)'}, "
-            f"cell_source={_display_source_key(target.get('cell_segmentation_source', ''), image_labels) or '(none)'}, "
+            f"cell_sources={cell_source_labels}, "
             f"output_variant={target.get('output_variant', '') or '(none)'}"
         )
     if not manifest["measurement_targets"]:

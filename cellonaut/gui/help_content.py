@@ -225,8 +225,8 @@ HELP_PAGES = [
         "Cellpose",
         f"""
         <p>Cellpose identifies individual cells and assigns each an ID. Enable it on the channel you want to measure,
-        then choose the image Cellpose should use to find cell boundaries. These can be different channels. Preview
-        one sample before adjusting settings.</p>
+        then choose one to three ordered image channels Cellpose should use to find cell boundaries. The first input
+        channel is also the cell-QC intensity source. Preview one sample before adjusting settings.</p>
         <h3>Settings reference</h3>
         <ul>
             <li><b>Model</b>: <code>cpsam</code> is the default; <code>cpsam_v2</code> is also bundled.</li>
@@ -238,8 +238,8 @@ HELP_PAGES = [
             <li><b>Flow threshold</b>: lower positive values reject more inconsistent shapes; higher keeps more. Zero disables this check.</li>
             <li><b>Remove border cells</b>: exclude partial cells touching the image edge.</li>
         </ul>
-        <p>The cell probability threshold is a score, not a percentage. Cellonaut sends the selected source as
-        a 2D grayscale image.</p>
+        <p>The cell probability threshold is a score, not a percentage. One selected input is sent as a 2D grayscale
+        image; two or three inputs are stacked in order as a multichannel image.</p>
         <h3>Acceleration</h3>
         <p>On Windows, the installer's <b>Automatic</b> choice uses CUDA when a compatible NVIDIA GPU and driver
         are available, otherwise CPU; <b>CPU only</b> disables GPU use. <b>Check Setup</b> shows the selected backend.</p>
@@ -247,13 +247,15 @@ HELP_PAGES = [
         <p>Cellonaut runs Cellpose in Python. Use the run's <code>Results/Logs/RunSummary.json</code>
         and log to identify the source channel, model, backend, and settings.</p>
         <ol>
-            <li>Read the selected Cellpose source as the same 2D grayscale plane or Z projection used by
-            the run. The Weka Before mask creation recipe is not a Cellpose preprocessing recipe.</li>
-            <li>Convert to float32. Integer images are divided by the maximum representable value of their
-            dtype; floating images are divided by their maximum when positive. Replace NaN with 0,
-            positive infinity with 1, and negative infinity with 0.</li>
-            <li>Run the recorded Cellpose model with the saved diameter, minimum area, cell probability
-            threshold, and flow threshold. Cellpose's own default normalization remains enabled.
+            <li>Read each selected Cellpose input as the same 2D plane or Z projection used by the run, then stack
+            multiple inputs in the selected order. The Weka Before mask creation recipe is not a Cellpose
+            preprocessing recipe.</li>
+            <li>Convert to finite float32 while preserving the native intensity scale, then let Cellpose perform
+            its own per-channel percentile normalization. Replace NaN with 0 and infinities with the nearest
+            finite value. Preserving scale is important for low-dynamic-range microscopy stored in 16-bit files.</li>
+            <li>Run the recorded Cellpose model with the saved diameter, cell probability threshold, and flow
+            threshold. Candidate labels are retained until Cellonaut performs the saved minimum-area cleanup.
+            Cellpose's own default normalization remains enabled.
             Reproduction requires the same Cellpose version, model weights, input, and settings;
             different compute backends can produce different boundaries.</li>
             <li>Remove labels with fewer pixels than Minimum cell area and renumber the retained labels

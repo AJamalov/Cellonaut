@@ -75,6 +75,7 @@ class MeasurementTarget:
 
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_sources: List[str] = field(default_factory=list)
     cell_segmentation_mask_source: str = ""
     # Non-empty when one measured channel is emitted once per selected Cellpose mask.
     output_variant: str = ""
@@ -108,6 +109,7 @@ class ResolvedMeasurementTarget:
     overlay_roi_keys: List[str] = field(default_factory=list)
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_sources: List[str] = field(default_factory=list)
     cell_segmentation_mask_source: str = ""
     output_variant: str = ""
     per_cell_mask_source: str = ""
@@ -159,6 +161,7 @@ class Config:
     overlay_roi_keys: List[str] = field(default_factory=list)
     do_cell_segmentation: bool = False
     cell_segmentation_source: str = ""
+    cell_segmentation_sources: List[str] = field(default_factory=list)
     cell_segmentation_mask_source: str = ""
     output_variant: str = ""
     per_cell_mask_source: str = ""
@@ -229,6 +232,11 @@ def resolve_measurement_target(cfg: Config, target: TargetConfig) -> ResolvedMea
         cell_segmentation_source=(
             target.cell_segmentation_source or target.source_image_key
             if target.do_cell_segmentation else target.cell_segmentation_source
+        ),
+        cell_segmentation_sources=(
+            list(dict.fromkeys(target.cell_segmentation_sources or [target.cell_segmentation_source or target.source_image_key]))[:3]
+            if target.do_cell_segmentation
+            else list(target.cell_segmentation_sources)
         ),
         cell_segmentation_mask_source=(
             target.cell_segmentation_mask_source or target.source_image_key

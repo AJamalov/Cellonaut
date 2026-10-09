@@ -478,8 +478,11 @@ def image_keys_needed_for_processing(
                 continue
             needed.add(image_def.key)
         for target in targets:
-            if target.do_cell_segmentation and target.cell_segmentation_source:
-                needed.add(target.cell_segmentation_source)
+            if target.do_cell_segmentation:
+                needed.update(
+                    target.cell_segmentation_sources
+                    or ([target.cell_segmentation_source] if target.cell_segmentation_source else [])
+                )
         return {key for key in needed if key}
 
     weka_status = existing_weka_threshold_mask_status(
@@ -500,9 +503,11 @@ def image_keys_needed_for_processing(
             needed.add(image_def.key)
 
     for target in targets:
-        segmentation_key = target.cell_segmentation_source or target.source_image_key
         if target.do_cell_segmentation:
-            needed.add(segmentation_key)
+            needed.update(
+                target.cell_segmentation_sources
+                or [target.cell_segmentation_source or target.source_image_key]
+            )
 
     return {key for key in needed if key}
 

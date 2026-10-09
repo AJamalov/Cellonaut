@@ -212,8 +212,17 @@ def validate_config(cfg: Config) -> None:
                 SetupErrorCode.WHOLE_CELL_OVERLAY,
                 "Cellpose whole-cell mask overlay requires Cellpose segmentation to be enabled.",
             )
-        if target.cell_segmentation_source and target.cell_segmentation_source not in keys:
-            raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose source channel must reference a configured channel")
+        segmentation_sources = [
+            source
+            for source in dict.fromkeys(target.cell_segmentation_sources or [target.cell_segmentation_source])
+            if source
+        ]
+        if len(segmentation_sources) > 3:
+            raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose accepts at most three ordered input channels")
+        if target.do_cell_segmentation and not segmentation_sources:
+            raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose requires at least one input channel")
+        if any(source not in keys for source in segmentation_sources):
+            raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose source channels must reference configured channels")
         if target.cell_segmentation_mask_source and target.cell_segmentation_mask_source not in keys:
             raise SetupError(SetupErrorCode.CELL_SOURCE, "Cellpose mask must reference a configured channel")
         if target.per_cell_mask_source and target.per_cell_mask_source not in roi_keys:
@@ -225,7 +234,7 @@ def validate_config(cfg: Config) -> None:
             )
             mask_key = target.cell_segmentation_mask_source or target.source_image_key
             settings_signature = (
-                target.cell_segmentation_source,
+                tuple(segmentation_sources),
                 target.cell_diameter,
                 target.cell_min_size,
                 target.cell_use_gpu,

@@ -236,11 +236,14 @@ def _log_full_run_configuration(
         logger(f"Mask reuse folder: {getattr(cfg, 'mask_source_dir', None) or cfg.output_dir}")
     logger("Measurements:")
     for target in enabled_targets:
+        cellpose_sources = list(getattr(target, "cell_segmentation_sources", []) or [])
+        if not cellpose_sources:
+            cellpose_sources = [target.cell_segmentation_source or target.source_image_key]
         logger(
             f"  - measured_channel={target.source_image_key}, overlay_base={target.overlay_base_image_key or '(measured channel)'}, "
             f"masks={target.overlay_roi_keys or []}, cell_masks={target.do_cell_segmentation}, "
             f"cell_mask={getattr(target, 'cell_segmentation_mask_source', '') or '(measured channel)'}, "
-            f"cell_mask_source={target.cell_segmentation_source or '(measured channel)'}, "
+            f"cellpose_inputs={cellpose_sources}, "
             f"output_variant={getattr(target, 'output_variant', '') or '(none)'}, "
             f"show_cell_mask={target.overlay_whole_cell_mask}"
         )

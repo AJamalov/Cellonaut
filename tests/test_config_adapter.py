@@ -724,6 +724,7 @@ def test_config_conversion_preserves_cell_segmentation_settings(tmp_path: Path):
                 "folder": "Brightfield",
                 "analysis_cell_segmentation_enabled": True,
                 "analysis_cell_segmentation_source": "Brightfield",
+                "analysis_cell_segmentation_sources": ["Brightfield", "GFP", "TxRed"],
                 "cell_diameter": "42.5",
                 "cell_min_size": "321",
                 "cellprob_threshold": "-1.5",
@@ -736,6 +737,8 @@ def test_config_conversion_preserves_cell_segmentation_settings(tmp_path: Path):
                 "mask_qc_limits": "Mask area:20-; Mask fraction of cell area:-0.8",
                 "qc_filter_mode": "Exclude only if both fail",
             },
+            {"name": "GFP", "folder": "GFP"},
+            {"name": "TxRed", "folder": "TxRed"},
         ],
     )
 
@@ -745,6 +748,7 @@ def test_config_conversion_preserves_cell_segmentation_settings(tmp_path: Path):
     assert target.source_image_key == "image1"
     assert target.do_cell_segmentation is True
     assert target.cell_segmentation_source == "image1"
+    assert target.cell_segmentation_sources == ["image1", "image2", "image3"]
     assert target.cell_diameter == 42.5
     assert target.cell_min_size == 321
     assert target.cell_use_gpu is True

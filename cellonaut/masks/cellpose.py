@@ -171,11 +171,71 @@ def build_cell_segmentation_cfg_from_pipeline(cfg: Any) -> CellSegmentationConfi
     )
 
 
+def cellpose_source_keys(cfg: Any) -> list[str]:
+    """Return one to three ordered inference sources with legacy fallback."""
+    sources = [
+        str(value or "").strip()
+        for value in list(getattr(cfg, "cell_segmentation_sources", []) or [])
+        if str(value or "").strip()
+    ]
+    legacy = str(getattr(cfg, "cell_segmentation_source", "") or "").strip()
+    if not sources and legacy:
+        sources = [legacy]
+    return list(dict.fromkeys(sources))[:3]
+
+
+def cellpose_label_cache_key(cfg: Any, mask_def: Any) -> str:
+    """Identify an in-memory label result by its complete inference recipe."""
+    mask_key = str(getattr(mask_def, "key", getattr(mask_def, "label", "")))
+    adjustments = tuple(sorted(dict(getattr(cfg, "cell_mask_adjustments", {}) or {}).items()))
+    signature = (
+        tuple(cellpose_source_keys(cfg)),
+        getattr(cfg, "cell_diameter", None),
+        getattr(cfg, "cell_min_size", None),
+        getattr(cfg, "cellprob_threshold", None),
+        getattr(cfg, "flow_threshold", None),
+        bool(getattr(cfg, "cell_remove_border", False)),
+        str(getattr(cfg, "cellpose_model_type", "") or ""),
+        str(getattr(cfg, "cellpose_custom_model_path", "") or ""),
+        adjustments,
+    )
+    return f"{mask_key}|{signature!r}"
+
+
+def build_cellpose_input(
+    cfg: Any,
+    image_map: Dict[str, Any],
+) -> tuple[np.ndarray, np.ndarray, list[Any]]:
+    """Build Cellpose's ordered YX or YXC tensor and its primary intensity plane."""
+    keys = cellpose_source_keys(cfg)
+    if not keys:
+        raise ValueError("At least one Cellpose input channel is required.")
+    definitions = [get_image_def(cfg, key) for key in keys]
+    planes: list[np.ndarray] = []
+    for image_def in definitions:
+        image = image_map.get(image_def.key)
+        if image is None:
+            raise ValueError(f"Cellpose input channel could not be opened: {image_def.label}")
+        plane = np.asarray(imageplus_to_numpy_2d(image))
+        if plane.ndim != 2:
+            raise ValueError(f"Cellpose input channel must be 2D: {image_def.label} has shape {plane.shape}")
+        if planes and plane.shape != planes[0].shape:
+            raise ValueError(
+                "Cellpose input channels must have matching dimensions: "
+                f"{planes[0].shape} and {plane.shape}"
+            )
+        planes.append(plane)
+    inference = planes[0] if len(planes) == 1 else np.stack(planes, axis=-1)
+    return inference, planes[0], definitions
+
+
 def _load_or_generate_cell_labels(
     *,
     cfg: Any,
     cell_source_img: Any,
     cell_source_label: str,
+    cellpose_input_arr: np.ndarray | None = None,
+    cellpose_input_labels: list[str] | None = None,
     source_def: Any,
     export_dirs: Dict[str, Path],
     result_id: str,
@@ -188,7 +248,7 @@ def _load_or_generate_cell_labels(
     # ``source_def`` is the reusable Cellpose-mask owner. Keep the historical
     # parameter name for direct extension/test callers.
     mask_def = source_def
-    cache_key = str(getattr(mask_def, "key", getattr(mask_def, "label", "")))
+    cache_key = cellpose_label_cache_key(cfg, mask_def)
     labels = label_cache.get(cache_key) if label_cache is not None else None
     cached_labels = labels is not None
     if cached_labels:
@@ -228,14 +288,20 @@ def _load_or_generate_cell_labels(
             raise ValueError("Cell mask image could not be opened.")
         if runtime is not None:
             runtime.stage(PipelineStage.SEGMENTATION, "Finding cells")
-        log_func(f"[{id_label}] Building cell masks on {cell_source_label}")
         cell_source_arr = imageplus_to_numpy_2d(cell_source_img)
+        if cellpose_input_arr is None:
+            cellpose_input_arr = cell_source_arr
+        if not cellpose_input_labels:
+            cellpose_input_labels = [cell_source_label]
+        input_description = " + ".join(cellpose_input_labels)
+        log_func(f"[{id_label}] Building cell masks on {input_description}")
         log_func(
-            f"[{id_label}] Cellpose input plane: source={cell_source_label}; "
-            f"shape={tuple(cell_source_arr.shape)}; dtype={cell_source_arr.dtype}"
+            f"[{id_label}] Cellpose input: sources={cellpose_input_labels}; "
+            f"shape={tuple(cellpose_input_arr.shape)}; dtype={cellpose_input_arr.dtype}; "
+            f"channel_axis={-1 if cellpose_input_arr.ndim == 3 else None}"
         )
         labels = run_cell_segmentation_on_image(
-            cell_source_arr,
+            cellpose_input_arr,
             segmentation_cfg,
             log_func=log_func,
             should_cancel=should_cancel,
@@ -263,7 +329,13 @@ def _load_or_generate_cell_labels(
         write_tiff(label_path, np.asarray(labels).astype(np.int32, copy=False))
         write_tiff(outline_path, cell_label_outline_mask(labels))
         for path, kind in ((label_path, "cell_labels"), (outline_path, "cell_outline")):
-            record_artifact(path, sample=result_id, target=cache_key, label=mask_def.label, kind=kind)
+            record_artifact(
+                path,
+                sample=result_id,
+                target=str(getattr(mask_def, "key", mask_def.label)),
+                label=mask_def.label,
+                kind=kind,
+            )
     return labels, cell_source_arr, segmentation_cfg
 
 
@@ -381,15 +453,18 @@ def run_cell_segmentation_for_sample(
 
     check_cancel(should_cancel)
 
-    cell_source_def = get_image_def(cfg, cfg.cell_segmentation_source)
+    cellpose_input_arr, cell_source_arr, cell_source_defs = build_cellpose_input(cfg, image_map)
+    cell_source_def = cell_source_defs[0]
     cell_mask_def = get_image_def(
         cfg,
-        getattr(cfg, "cell_segmentation_mask_source", "") or cfg.cell_segmentation_source,
+        getattr(cfg, "cell_segmentation_mask_source", "") or cell_source_def.key,
     )
     cell_mask_key = str(getattr(cell_mask_def, "key", cell_mask_def.label))
-    labels_were_cached = label_cache is not None and cell_mask_key in label_cache
     cell_source_img = image_map.get(cell_source_def.key)
     cell_source_label = cell_source_def.label
+    input_labels = [image_def.label for image_def in cell_source_defs]
+    cache_key = cellpose_label_cache_key(cfg, cell_mask_def)
+    labels_were_cached = label_cache is not None and cache_key in label_cache
     cell_mask_label = cell_mask_def.label
     measurement_source_arr = imageplus_to_numpy_2d(measurement_source_img)
     source_measure_arr = imageplus_to_numpy_2d(source_measure_img)
@@ -398,6 +473,8 @@ def run_cell_segmentation_for_sample(
         cfg=cfg,
         cell_source_img=cell_source_img,
         cell_source_label=cell_source_label,
+        cellpose_input_arr=cellpose_input_arr,
+        cellpose_input_labels=input_labels,
         source_def=cell_mask_def,
         export_dirs=export_dirs,
         result_id=result_id,

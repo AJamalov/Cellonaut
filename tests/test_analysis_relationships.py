@@ -99,6 +99,27 @@ def test_remap_analysis_references_preserves_relationships_after_renaming():
     assert remapped[0]["mask_relationships"] == {"ER": True}
 
 
+def test_remap_analysis_references_preserves_ordered_cellpose_inputs():
+    image_defs = [
+        image_def(
+            "Cell",
+            analysis_cell_segmentation_source="Cell",
+            analysis_cell_segmentation_sources=["Cell", "GFP", "TxRed"],
+        ),
+        image_def("GFP"),
+        image_def("TxRed"),
+    ]
+
+    remapped = remap_analysis_references(
+        image_defs,
+        ["Cell", "GFP", "TxRed"],
+        ["Brightfield", "Green", "Red"],
+    )
+
+    assert remapped[0]["analysis_cell_segmentation_sources"] == ["Brightfield", "Green", "Red"]
+    assert remapped[0]["analysis_cell_segmentation_source"] == "Brightfield"
+
+
 def test_normalize_analysis_relationships_prunes_targets_without_classifiers():
     image_defs = [
         image_def(

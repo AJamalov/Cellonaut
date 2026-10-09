@@ -187,6 +187,9 @@ def _cellpose_model_settings(cfg: Any) -> list[dict[str, Any]]:
         if not bool(getattr(target, "do_cell_segmentation", False)):
             continue
         effective = config_for_measurement_target(cfg, target)
+        input_channels = list(effective.cell_segmentation_sources) or [
+            effective.cell_segmentation_source or effective.source_image_key
+        ]
         settings.append(
             {
                 "scope": (
@@ -196,6 +199,7 @@ def _cellpose_model_settings(cfg: Any) -> list[dict[str, Any]]:
                 "model_type": effective.cellpose_model_type,
                 "custom_model_path": effective.cellpose_custom_model_path,
                 "diameter": effective.cell_diameter,
+                "input_channels": input_channels,
                 "minimum_cell_area": effective.cell_min_size,
                 "cellprob_threshold": effective.cellprob_threshold,
                 "flow_threshold": effective.flow_threshold,
@@ -209,6 +213,9 @@ def _cellpose_model_settings(cfg: Any) -> list[dict[str, Any]]:
 # the values that were actually handed to processing after inheritance.
 def _effective_measurement_target_settings(cfg: Any, target: Any) -> dict[str, Any]:
     effective = config_for_measurement_target(cfg, target)
+    input_channels = list(effective.cell_segmentation_sources) or [
+        effective.cell_segmentation_source or effective.source_image_key
+    ]
     return {
         "source_image_key": target.source_image_key,
         "enabled": bool(target.enabled),
@@ -217,6 +224,7 @@ def _effective_measurement_target_settings(cfg: Any, target: Any) -> dict[str, A
         "overlay_whole_cell_mask": bool(effective.overlay_whole_cell_mask),
         "do_cell_segmentation": bool(effective.do_cell_segmentation),
         "cell_segmentation_source": effective.cell_segmentation_source,
+        "cell_segmentation_sources": input_channels,
         "cell_segmentation_mask_source": effective.cell_segmentation_mask_source,
         "output_variant": effective.output_variant,
         "per_cell_mask_source": effective.per_cell_mask_source,

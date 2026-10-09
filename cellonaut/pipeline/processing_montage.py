@@ -289,6 +289,8 @@ def _tile_display_limits(
     shared_limits: tuple[float, float] | None,
 ) -> tuple[float, float] | None:
     lower_label = str(label or "").lower()
+    if "cellpose input" in lower_label and np.asarray(arr).ndim == 2:
+        return _display_limits([np.asarray(arr)])
     if "probability" in lower_label:
         return _display_limits([np.asarray(arr)])
     if "raw" in lower_label or "subtract background" in lower_label or "measurement" in lower_label:
@@ -396,8 +398,8 @@ def _label_boundary(labels: np.ndarray) -> np.ndarray:
 # Combine a light fill with a solid boundary so users can inspect both mask extent
 # and the underlying image intensity in the same tile.
 def _overlay_mask(base_arr: np.ndarray, mask_arr: np.ndarray) -> np.ndarray:
-    gray = _to_uint8(np.asarray(base_arr))
-    rgb = np.repeat(gray[..., None], 3, axis=2)
+    rendered = _to_uint8(np.asarray(base_arr))
+    rgb = np.repeat(rendered[..., None], 3, axis=2) if rendered.ndim == 2 else rendered.copy()
     mask = np.asarray(mask_arr, dtype=bool)
     if mask.shape[:2] != rgb.shape[:2]:
         return rgb
@@ -409,8 +411,8 @@ def _overlay_mask(base_arr: np.ndarray, mask_arr: np.ndarray) -> np.ndarray:
 # Use a distinct color for whole-cell labels so Cellpose output cannot be confused
 # with red Weka-mask overlays.
 def _overlay_labels(base_arr: np.ndarray, label_arr: np.ndarray) -> np.ndarray:
-    gray = _to_uint8(np.asarray(base_arr))
-    rgb = np.repeat(gray[..., None], 3, axis=2)
+    rendered = _to_uint8(np.asarray(base_arr))
+    rgb = np.repeat(rendered[..., None], 3, axis=2) if rendered.ndim == 2 else rendered.copy()
     labels = np.asarray(label_arr)
     mask = labels > 0
     if mask.shape[:2] != rgb.shape[:2]:
@@ -418,6 +420,22 @@ def _overlay_labels(base_arr: np.ndarray, label_arr: np.ndarray) -> np.ndarray:
     rgb[mask] = (0.75 * rgb[mask] + np.array([0, 170, 255], dtype=None) * 0.25).astype(np.uint8)
     rgb[_label_boundary(labels)] = np.array([0, 220, 255], dtype=np.uint8)
     return rgb
+
+
+def _cellpose_input_display(arr: np.ndarray) -> np.ndarray:
+    """Render an ordered multichannel Cellpose tensor as RGB for review."""
+    data = np.asarray(arr)
+    if data.ndim == 2:
+        return data
+    if data.ndim != 3 or data.shape[-1] not in (2, 3):
+        raise ValueError(f"Unsupported Cellpose montage input shape: {data.shape}")
+    channels = []
+    for index in range(data.shape[-1]):
+        channel = data[..., index]
+        channels.append(_to_uint8(channel, limits=_display_limits([channel])))
+    while len(channels) < 3:
+        channels.append(np.zeros_like(channels[0], dtype=np.uint8))
+    return np.stack(channels[:3], axis=-1)
 
 
 # ROI maps are keyed by stable pipeline IDs rather than display labels, so resolve
@@ -666,7 +684,8 @@ def save_processing_montages_for_sample(
 def save_cellpose_montage_for_sample(
     *,
     image_map: dict[str, Any],
-    cell_source_def: Any,
+    cell_source_def: Any | None = None,
+    cell_source_defs: Sequence[Any] | None = None,
     source_def: Any,
     extra_overlay_masks: dict[str, np.ndarray],
     export_dir: Path,
@@ -679,26 +698,35 @@ def save_cellpose_montage_for_sample(
     if labels is None:
         return None
 
-    source_img = image_map.get(getattr(cell_source_def, "key", ""))
-    if source_img is None:
+    selected_defs = list(cell_source_defs or ([] if cell_source_def is None else [cell_source_def]))
+    if not selected_defs:
         return None
-
-    raw_arr = np.asarray(imageplus_to_numpy_2d(source_img)).copy()
+    planes = []
+    for selected_def in selected_defs[:3]:
+        source_img = image_map.get(getattr(selected_def, "key", ""))
+        if source_img is None:
+            return None
+        plane = np.asarray(imageplus_to_numpy_2d(source_img)).copy()
+        if planes and plane.shape != planes[0].shape:
+            raise ValueError("Cellpose montage input channels have different dimensions")
+        planes.append(plane)
+    raw_arr = planes[0] if len(planes) == 1 else np.stack(planes, axis=-1)
+    display_arr = _cellpose_input_display(raw_arr)
     label_arr = np.asarray(labels)
     foreground = (label_arr > 0).astype(np.uint8) * 255
     outline = _label_boundary(label_arr).astype(np.uint8) * 255
     tiles: list[tuple[str, np.ndarray]] = [
-        ("Cellpose input", raw_arr),
+        ("Cellpose input", display_arr),
         ("Cellpose labels", foreground),
         ("Cellpose outlines", outline),
-        ("Final overlay", _overlay_labels(raw_arr, label_arr)),
+        ("Final overlay", _overlay_labels(display_arr, label_arr)),
     ]
 
     flagged = extra_overlay_masks.get("__flagged_cell_mask__")
     if flagged is not None:
         flagged_arr = np.asarray(flagged, dtype=bool)
         tiles.append(("CSV-excluded cell groups", flagged_arr.astype(np.uint8) * 255))
-        tiles.append(("Flagged overlay", _overlay_mask(raw_arr, flagged_arr)))
+        tiles.append(("Flagged overlay", _overlay_mask(display_arr, flagged_arr)))
 
     variant_suffix = f"_{_safe_name(output_variant)}" if str(output_variant or "").strip() else ""
     out_file = (

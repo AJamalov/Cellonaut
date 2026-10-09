@@ -446,7 +446,7 @@ class ConfigurationSummaryDialog(QDialog):
             self.make_table(
                 [
                     "Cellpose mask",
-                    "Cellpose source channel",
+                    "Cellpose input channels",
                     "Diameter (px)",
                     "Minimum cell area (px²)",
                     "Probability threshold",

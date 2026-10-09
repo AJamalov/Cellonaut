@@ -76,6 +76,21 @@ def test_probability_tiles_use_local_contrast_when_values_are_low():
     assert int(rendered[0, 1]) == 255
 
 
+def test_cellpose_input_uses_local_contrast_independent_of_empty_mask_tiles():
+    source = np.arange(100, 200, dtype=np.uint16).reshape(10, 10)
+    shared_limits = processing_montage._display_limits(
+        [source, np.zeros_like(source), np.zeros_like(source)]
+    )
+
+    rendered = _to_uint8(
+        source,
+        limits=_tile_display_limits("Cellpose input", source, shared_limits),
+    )
+
+    assert int(rendered[0, 0]) == 0
+    assert int(rendered[-1, -1]) == 255
+
+
 def test_unreadable_optional_montage_artifact_is_logged(tmp_path, monkeypatch):
     probability_dir = tmp_path / "probability"
     probability_dir.mkdir()
@@ -232,6 +247,41 @@ def test_cellpose_montage_contains_flagged_views_and_logs_saved_file(monkeypatch
         "Flagged overlay",
     ]
     assert "Saved Cellpose montage" in messages[0]
+
+
+def test_cellpose_montage_displays_all_ordered_input_channels(monkeypatch, tmp_path):
+    captured = {}
+    arrays = {
+        "bf": np.arange(16, dtype=np.uint16).reshape(4, 4),
+        "gfp": np.arange(16, dtype=np.uint16).reshape(4, 4) * 2,
+        "rfp": np.arange(16, dtype=np.uint16).reshape(4, 4) * 3,
+    }
+
+    monkeypatch.setattr(
+        processing_montage,
+        "imageplus_to_numpy_2d",
+        lambda image: arrays[image],
+    )
+    monkeypatch.setattr(
+        processing_montage,
+        "save_montage_png",
+        lambda tiles, out_file: captured.update(tiles=tiles) or out_file,
+    )
+
+    save_cellpose_montage_for_sample(
+        image_map={key: key for key in arrays},
+        cell_source_defs=[SimpleNamespace(key=key) for key in arrays],
+        source_def=SimpleNamespace(key="bf", label="Brightfield"),
+        extra_overlay_masks={"__whole_cell_mask__": np.ones((4, 4), dtype=np.int32)},
+        export_dir=tmp_path,
+        result_id="sample",
+        log_func=lambda _message: None,
+    )
+
+    display = captured["tiles"][0][1]
+    assert display.shape == (4, 4, 3)
+    assert np.array_equal(display[..., 0], display[..., 1])
+    assert np.array_equal(display[..., 1], display[..., 2])
 
 
 def test_cellpose_montage_skips_missing_labels_or_source_image(tmp_path):

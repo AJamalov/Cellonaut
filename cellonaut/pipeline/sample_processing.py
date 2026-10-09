@@ -10,7 +10,7 @@ import numpy as np
 from cellonaut.runtime import PipelineStage
 from cellonaut.config.defaults import IMAGE_PROCESSING_SCOPE_MEASUREMENT
 from cellonaut.io.imagej_runtime import get_java_classes
-from cellonaut.masks.cellpose import run_cell_segmentation_for_sample
+from cellonaut.masks.cellpose import cellpose_source_keys, run_cell_segmentation_for_sample
 from cellonaut.masks.roi_processing import subtract_background_copy
 from cellonaut.measurement.execution import (
     measure_rois_for_source,
@@ -224,10 +224,10 @@ def process_sample(
         )
         if cfg.do_cell_segmentation and "__whole_cell_mask__" in extra_overlay_masks:
             try:
-                cell_source_def = get_image_def(cfg, cfg.cell_segmentation_source)
+                cell_source_defs = [get_image_def(cfg, key) for key in cellpose_source_keys(cfg)]
                 save_cellpose_montage_for_sample(
                     image_map=image_map,
-                    cell_source_def=cell_source_def,
+                    cell_source_defs=cell_source_defs,
                     source_def=source_def,
                     extra_overlay_masks=extra_overlay_masks,
                     export_dir=export_dirs["processing_montages"],

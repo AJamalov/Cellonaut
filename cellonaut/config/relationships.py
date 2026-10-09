@@ -182,6 +182,17 @@ def remap_analysis_references(
             image_def.get("analysis_cell_segmentation_source", ""),
             own_name,
         )
+        remapped_segmentation_sources = [
+            remap_name(source, "")
+            for source in list(image_def.get("analysis_cell_segmentation_sources", []) or [])
+        ]
+        remapped_segmentation_sources = list(
+            dict.fromkeys(source for source in remapped_segmentation_sources if source)
+        )[:3]
+        if not remapped_segmentation_sources:
+            remapped_segmentation_sources = [image_def["analysis_cell_segmentation_source"]]
+        image_def["analysis_cell_segmentation_sources"] = remapped_segmentation_sources
+        image_def["analysis_cell_segmentation_source"] = remapped_segmentation_sources[0]
         remapped_cellpose_sources = [
             remap_name(source, "") for source in cellpose_mask_source_names(image_def)
         ]
@@ -265,6 +276,16 @@ def normalize_analysis_relationships(image_defs: list[dict[str, Any]]) -> list[d
         cell_source = str(image_def.get("analysis_cell_segmentation_source", "") or "").strip()
         if cell_source not in valid_channel_name_set:
             image_def["analysis_cell_segmentation_source"] = own_name
+        segmentation_sources = [
+            str(source or "").strip()
+            for source in list(image_def.get("analysis_cell_segmentation_sources", []) or [])
+            if str(source or "").strip() in valid_channel_name_set
+        ]
+        if not segmentation_sources:
+            segmentation_sources = [image_def["analysis_cell_segmentation_source"]]
+        segmentation_sources = list(dict.fromkeys(segmentation_sources))[:3]
+        image_def["analysis_cell_segmentation_sources"] = segmentation_sources
+        image_def["analysis_cell_segmentation_source"] = segmentation_sources[0]
 
         selected_cellpose = [
             source for source in cellpose_mask_source_names(image_def) if source in enabled_cellpose_names

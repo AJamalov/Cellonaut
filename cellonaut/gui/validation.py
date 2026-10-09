@@ -574,7 +574,10 @@ class CellonautGuiValidationMixin(CellonautGuiFieldValidationMixin):
                 summary["cell_segmentation"].append(
                     {
                         "source": str(img.get("name", "") or "").strip(),
-                        "seg_source": str(img.get("analysis_cell_segmentation_source", "") or "").strip(),
+                        "seg_source": " + ".join(
+                            list(img.get("analysis_cell_segmentation_sources", []) or [])
+                            or [str(img.get("analysis_cell_segmentation_source", "") or "").strip()]
+                        ),
                         "diameter": str(img.get("cell_diameter", DEFAULT_CELL_DIAMETER) or "Original scale"),
                         "min_size": str(img.get("cell_min_size", DEFAULT_CELL_MIN_SIZE) or DEFAULT_CELL_MIN_SIZE),
                         "cellprob": str(

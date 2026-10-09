@@ -960,6 +960,7 @@ def default_image_definition(index: int) -> dict:
         "cell_group_mask_source": "",
         "analysis_cell_segmentation_enabled": False,
         "analysis_cell_segmentation_source": name,
+        "analysis_cell_segmentation_sources": [name],
         "analysis_cellpose_mask_sources": [],
         "analysis_cellpose_mask_source": "",
         "cell_diameter": DEFAULT_CELL_DIAMETER,
