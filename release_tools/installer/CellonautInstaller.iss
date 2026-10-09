@@ -11,12 +11,16 @@
 #define ProjectRoot ExtractFileDir(ExtractFileDir(ExtractFileDir(SourcePath)))
 
 [Setup]
-AppId={{9A7F3B1D-8E94-4E0A-A0F4-96FA6DCA7D10}
+; Keep this identity independent from the retired YeastBuddy installer so both
+; applications can be installed side by side without sharing upgrade state.
+AppId={{DE791F16-CF65-4E65-8D52-3604197F634A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
+DisableDirPage=no
+UsePreviousAppDir=yes
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma

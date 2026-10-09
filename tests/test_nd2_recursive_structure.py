@@ -149,7 +149,7 @@ def test_nd2_export_numbers_existing_files_without_overwriting(tmp_path, monkeyp
     monkeypatch.setattr(nd2_import, "get_nd2_channel_names", lambda _f: ["GFP"])
     monkeypatch.setattr(nd2_import, "get_nd2_channel_colors", lambda *_args: ["#00FF00"])
     monkeypatch.setattr(nd2_import, "get_nd2_pixel_sizes_um", lambda *_args: (None, None))
-    monkeypatch.setattr(nd2_import, "read_first_nd2_position", lambda _f: pixels)
+    monkeypatch.setattr(nd2_import, "read_nd2_position", lambda _f, _position: pixels)
     monkeypatch.setattr(nd2_import, "_select_channel_plane", lambda **_kwargs: pixels)
     real_writer = nd2_import.write_ome_channel_stack
     raced = output / "sample_3.ome.tif"

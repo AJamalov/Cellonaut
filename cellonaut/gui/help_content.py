@@ -140,8 +140,8 @@ HELP_PAGES = [
         <p>Use <b>Import ND2 files...</b> to convert ND2 files to TIFF, then select the converted folder as input.
         Check the channel mapping; leave a TIFF channel name blank to skip that channel. For Z stacks, choose
         <b>Max projection</b> or a <b>Single Z slice</b> numbered from 1. The chosen slice must exist in every file.</p>
-        <p><b>Check before converting:</b> Multiple timepoints and XY positions use the first one. RGB data uses
-        only its first component. Conversion writes lossless OME-TIFF files and does not overwrite existing output files. Existing names receive
+        <p><b>Check before converting:</b> For multiple timepoints or XY positions, choose the one to export in the
+        conversion window. RGB data uses only its first component. Conversion writes lossless OME-TIFF files and does not overwrite existing output files. Existing names receive
         a numbered suffix: sample.ome.tif, sample_2.ome.tif, sample_3.ome.tif. Repeating a conversion creates
         additional copies; it does not resume by skipping completed files.</p>
         """,

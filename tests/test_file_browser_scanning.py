@@ -412,7 +412,7 @@ def test_folder_layout_remaps_default_mask_relationships(tmp_path: Path):
     assert browser.image_definitions[1]["mask_source_channel"] == "GFP"
 
 
-def test_apply_detected_image_folders_from_flat_tiff_stack_builds_channel_rows(tmp_path: Path):
+def test_apply_detected_image_folders_does_not_guess_unlabeled_page_axis(tmp_path: Path):
     if getattr(np, "__cellonaut_stub__", False):
         pytest.skip("numpy is stubbed in this lightweight test environment")
 
@@ -425,8 +425,30 @@ def test_apply_detected_image_folders_from_flat_tiff_stack_builds_channel_rows(t
 
     browser.apply_detected_image_folders_from_input(str(tmp_path))
 
-    assert [img["stack_channel_index"] for img in browser.image_definitions] == ["1", "2", "3"]
-    assert [img["name"] for img in browser.image_definitions] == ["Channel 1", "Channel 2", "Channel 3"]
+    assert browser.image_definitions == []
+    assert any("pages may be channels or Z slices" in message for message in browser.logs)
+
+
+def test_apply_detected_ome_channels_matches_existing_rows_by_name_before_layer(tmp_path: Path):
+    tifffile.imwrite(
+        tmp_path / "sample_001.ome.tif",
+        np.zeros((2, 4, 5), dtype=np.uint16),
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["DAPI", "mCherry"]}},
+    )
+    browser = DummyFileBrowser()
+    mcherry = default_image_definition(0)
+    mcherry.update({"name": "mCherry", "folder": "mCherry", "stack_channel_index": "1"})
+    dapi = default_image_definition(1)
+    dapi.update({"name": "DAPI", "folder": "DAPI", "stack_channel_index": "2"})
+    browser.image_definitions = [mcherry, dapi]
+
+    browser.apply_detected_image_folders_from_input(str(tmp_path))
+
+    by_name = {image["name"]: image for image in browser.image_definitions}
+    assert by_name["mCherry"]["stack_channel_index"] == "2"
+    assert by_name["DAPI"]["stack_channel_index"] == "1"
 
 
 def test_scan_input_path_collects_tiff_metadata_off_gui_thread(tmp_path: Path):

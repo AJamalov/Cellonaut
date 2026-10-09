@@ -222,6 +222,9 @@ def get_tiff_stack_info(path: Path) -> dict[str, Any]:
     """Read TIFF shape, axes, channels, and calibration without loading pixels."""
 
     with tifffile.TiffFile(str(path)) as tif:
+        series_count = len(tif.series)
+        if series_count < 1:
+            raise ValueError(f"TIFF contains no readable image series: {path.name}")
         series = tif.series[0]
         axes = str(getattr(series, "axes", "") or "")
         shape = tuple(int(x) for x in series.shape)
@@ -272,12 +275,18 @@ def get_tiff_stack_info(path: Path) -> dict[str, Any]:
         "axes": axes,
         "shape": shape,
         "channel_axis": channel_axis,
+        "channel_axis_source": "declared" if _channel_axis_from_axes(axes) is not None else (
+            "page_fallback" if channel_axis is not None else "none"
+        ),
+        "ambiguous_page_axis": _channel_axis_from_axes(axes) is None and channel_axis is not None,
         "channel_count": channel_count,
         "channel_names": channel_names[:channel_count],
         "channel_colors": channel_colors[:channel_count],
         "physical_size_x": _optional_float(physical_size_x),
         "physical_size_y": _optional_float(physical_size_y),
         "physical_size_unit": physical_size_unit,
+        "series_count": series_count,
+        "series_index": 0,
     }
 
 
@@ -299,6 +308,12 @@ def _read_tiff_selected_layer(
     stack_z_index: int | None = None,
 ) -> np.ndarray:
     with tifffile.TiffFile(str(path)) as tif:
+        series_count = len(tif.series)
+        if series_count != 1:
+            raise ValueError(
+                f"TIFF {path.name} contains {series_count} image series. "
+                "Cellonaut will not silently choose a scene/position; export the intended series as its own OME-TIFF."
+            )
         series = tif.series[0]
         axes = str(getattr(series, "axes", "") or "")
         arr = series.asarray()
@@ -529,17 +544,12 @@ def resolve_channel_indices_for_file_map(
         return channel_indices
 
     physical_defs = [img for img in file_backed_defs if not getattr(img, "stack_source_image_key", "")]
-    missing = [img for img in physical_defs if channel_indices.get(img.key) is None]
 
     def propagate_source_layers() -> None:
         for img in file_backed_defs:
             source_key = str(getattr(img, "stack_source_image_key", "") or "")
             if source_key:
                 channel_indices[img.key] = channel_indices.get(source_key)
-
-    if not missing:
-        propagate_source_layers()
-        return channel_indices
 
     sample_path = paths[0]
     try:
@@ -548,11 +558,69 @@ def resolve_channel_indices_for_file_map(
         raise ValueError(f"Cannot automatically map TIFF channels for {sample_path.name}: {exc}") from exc
 
     channel_count = int(info.get("channel_count", 1) or 1)
+    series_count = int(info.get("series_count", 1) or 1)
+    if series_count != 1:
+        raise ValueError(
+            f"TIFF {sample_path.name} contains {series_count} image series. "
+            "Cellonaut will not guess which scene or position should be analyzed; "
+            "export the intended series as a separate OME-TIFF."
+        )
     if channel_count < len(physical_defs):
         raise ValueError(
             f"TIFF {sample_path.name} has {channel_count} channel(s), but {len(physical_defs)} physical channels are configured. "
             "Correct the channel configuration before processing this sample."
         )
+
+    if bool(info.get("ambiguous_page_axis", False)):
+        if len(physical_defs) == 1:
+            only_image = physical_defs[0]
+            channel_indices[only_image.key] = None
+            propagate_source_layers()
+            log_func(
+                f"[INFO] TIFF {sample_path.name} has an unlabeled page axis; treating it as a Z stack "
+                f"for the single configured channel {only_image.label!r}."
+            )
+            return channel_indices
+        if any(channel_indices.get(img.key) is None for img in physical_defs):
+            raise ValueError(
+                f"TIFF {sample_path.name} has an unlabeled page axis that could represent channels or Z slices. "
+                "Cellonaut will not infer this from page order. Export an OME-TIFF with explicit C/Z axes."
+            )
+
+    channel_names = [str(name or "").strip() for name in list(info.get("channel_names", []) or [])]
+    name_layers: dict[str, list[int]] = {}
+    for layer, name in enumerate(channel_names, start=1):
+        if name:
+            name_layers.setdefault(name.casefold(), []).append(layer)
+
+    for img in physical_defs:
+        identity_names = {
+            str(getattr(img, "label", "") or "").strip().casefold(),
+            str(getattr(img, "folder_name", "") or "").strip().casefold(),
+        }
+        matched_layers = {
+            layers[0]
+            for identity in identity_names
+            if identity and len((layers := name_layers.get(identity, []))) == 1
+        }
+        if len(matched_layers) != 1:
+            continue
+        matched_layer = matched_layers.pop()
+        previous_layer = channel_indices.get(img.key)
+        channel_indices[img.key] = matched_layer
+        if previous_layer is not None and int(previous_layer) != matched_layer:
+            log_func(
+                f"[INFO] Corrected TIFF channel mapping for {img.label}: "
+                f"saved layer {previous_layer} -> OME layer {matched_layer} ({channel_names[matched_layer - 1]})."
+            )
+
+    for img in physical_defs:
+        configured_layer = channel_indices.get(img.key)
+        if configured_layer is not None and not 1 <= int(configured_layer) <= channel_count:
+            raise ValueError(
+                f"Configured TIFF layer {configured_layer} for {img.label} is outside the "
+                f"1-{channel_count} layers in {sample_path.name}."
+            )
 
     used_layers: set[int] = set()
     for img in physical_defs:

@@ -230,6 +230,10 @@ def _load_or_generate_cell_labels(
             runtime.stage(PipelineStage.SEGMENTATION, "Finding cells")
         log_func(f"[{id_label}] Building cell masks on {cell_source_label}")
         cell_source_arr = imageplus_to_numpy_2d(cell_source_img)
+        log_func(
+            f"[{id_label}] Cellpose input plane: source={cell_source_label}; "
+            f"shape={tuple(cell_source_arr.shape)}; dtype={cell_source_arr.dtype}"
+        )
         labels = run_cell_segmentation_on_image(
             cell_source_arr,
             segmentation_cfg,

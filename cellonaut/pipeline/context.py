@@ -10,6 +10,7 @@ from cellonaut.runtime import PipelineRuntime, PipelineStage
 from cellonaut.exceptions import PipelineCancelled
 from cellonaut.io.image_io import (
     find_channel_files,
+    get_tiff_stack_info,
     open_channel_arrays,
     open_channel_images,
     resolve_channel_indices_for_file_map,
@@ -141,14 +142,41 @@ def build_sample_processing_context(
         image.key: getattr(image, "stack_z_mode", "max_projection") or "max_projection" for image in cfg.images
     }
     channel_z_indices = {image.key: getattr(image, "stack_z_index", None) for image in cfg.images}
+    channel_indices = resolve_channel_indices_for_file_map(
+        image_defs=cfg.images,
+        # Automatic stack layers are defined by the complete configured channel
+        # order, not by the subset needed for this measurement target.
+        file_map=file_map,
+        input_structure=cfg.input_structure,
+        log_func=log_func,
+    )
+    tiff_info_cache: dict[str, dict[str, Any]] = {}
     for key, path in file_map.items():
         image_def = image_defs_by_key.get(key)
-        layer = image_def.stack_channel_index if image_def is not None else None
+        layer = channel_indices.get(key)
         z_mode = channel_z_modes.get(key, "max_projection")
         z_index = channel_z_indices.get(key)
         parts = []
+        info: dict[str, Any] = {}
+        if path is not None:
+            cache_key = str(path.resolve())
+            if cache_key not in tiff_info_cache:
+                try:
+                    tiff_info_cache[cache_key] = get_tiff_stack_info(path)
+                except Exception as exc:
+                    tiff_info_cache[cache_key] = {"metadata_error": str(exc)}
+            info = tiff_info_cache[cache_key]
+            if info.get("metadata_error"):
+                parts.append("TIFF metadata unavailable before open")
+            else:
+                parts.append(f"series: 1/{int(info.get('series_count', 1) or 1)}")
+                parts.append(f"axes: {info.get('axes') or 'unlabeled'}")
+                parts.append(f"shape: {tuple(info.get('shape', ()))}")
         if layer is not None:
             parts.append(f"stack layer: {layer}")
+            names = list(info.get("channel_names", []) or []) if path is not None else []
+            if 1 <= int(layer) <= len(names):
+                parts.append(f"channel: {names[int(layer) - 1]}")
         if z_mode == "single_z":
             parts.append(f"Z slice: {z_index or 1}")
         elif z_mode == "max_projection":
@@ -167,15 +195,6 @@ def build_sample_processing_context(
             "(shared TIFF planes are loaded once)"
         )
     filtered_file_map = {key: path for key, path in file_map.items() if key in image_keys_to_open}
-    channel_indices = resolve_channel_indices_for_file_map(
-        image_defs=cfg.images,
-        # Automatic stack layers are defined by the complete configured channel
-        # order, not by the subset needed for this measurement target.
-        file_map=file_map,
-        input_structure=cfg.input_structure,
-        log_func=log_func,
-    )
-
     open_channels = open_channel_arrays if use_native_arrays else open_channel_images
     if use_native_arrays:
         log_func(f"[{id_label}] No Fiji/Weka steps required; " "opening TIFFs without ImageJ.")

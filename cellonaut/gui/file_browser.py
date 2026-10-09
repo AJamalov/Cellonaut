@@ -343,6 +343,8 @@ def _summarize_nd2_dataset(
     cancel_requested: Callable[[], bool] | None,
 ) -> tuple[dict, dict]:
     z_depths: list[int] = []
+    position_counts: list[int] = []
+    time_counts: list[int] = []
     issues: list[str] = []
     issue_count = 0
     metadata_error_count = 0
@@ -356,6 +358,8 @@ def _summarize_nd2_dataset(
             current_sizes = dict(current_info.get("sizes", {}) or {})
             current_channels = list(current_info.get("channel_names", []) or [])
             z_depths.append(max(1, int(current_sizes.get("Z", 1) or 1)))
+            position_counts.append(max(1, int(current_sizes.get("P", 1) or 1)))
+            time_counts.append(max(1, int(current_sizes.get("T", 1) or 1)))
             relative_name = str(nd2_path.relative_to(root))
             if current_channels != reference_channels:
                 issue_count += 1
@@ -397,6 +401,10 @@ def _summarize_nd2_dataset(
             "issue_count": issue_count,
             "issues": issues,
             "compatible": inspected_all and issue_count == 0,
+            "min_p_count": min(position_counts, default=1),
+            "max_p_count": max(position_counts, default=1),
+            "min_t_count": min(time_counts, default=1),
+            "max_t_count": max(time_counts, default=1),
         },
     )
 
@@ -997,6 +1005,20 @@ class CellonautGuiFileBrowserMixin(GuiMixin):
         channel_count = max(1, int(info.get("channel_count", 1) or 1))
         channel_names = list(info.get("channel_names", []) or [])
         channel_colors = list(info.get("channel_colors", []) or [])
+        series_count = max(1, int(info.get("series_count", 1) or 1))
+        if series_count != 1:
+            self.log(
+                f"[AUTO] {first_tiff.name} contains {series_count} image series. "
+                "Channel setup was not changed because Cellonaut will not guess which scene or position to use."
+            )
+            return False
+        if bool(info.get("ambiguous_page_axis", False)):
+            self.log(
+                f"[AUTO] {first_tiff.name} has an unlabeled TIFF page axis. "
+                "Channel setup was not changed because the pages may be channels or Z slices. "
+                "Use an OME-TIFF with explicit C/Z axes."
+            )
+            return False
         old_defs = self.get_active_image_definitions()
         old_channel_defs = [dict(image_def) for image_def in old_defs if self.is_physical_channel_definition(image_def)]
         mask_defs = [
@@ -1008,12 +1030,21 @@ class CellonautGuiFileBrowserMixin(GuiMixin):
         old_names = [str(img.get("name", "") or f"Image{i + 1}").strip() for i, img in enumerate(old_defs)]
 
         old_by_layer = {
-            str(img.get("stack_channel_index", "") or "").strip(): dict(img)
-            for img in old_channel_defs
+            str(img.get("stack_channel_index", "") or "").strip(): old_index
+            for old_index, img in enumerate(old_channel_defs)
             if str(img.get("stack_channel_index", "") or "").strip()
         }
+        old_identity_indices: dict[str, list[int]] = {}
+        for old_index, image_def in enumerate(old_channel_defs):
+            for identity in {
+                str(image_def.get("name", "") or "").strip().casefold(),
+                str(image_def.get("folder", "") or "").strip().casefold(),
+            }:
+                if identity:
+                    old_identity_indices.setdefault(identity, []).append(old_index)
 
         new_defs = []
+        used_old_indices: set[int] = set()
         for idx in range(channel_count):
             layer = str(idx + 1)
             detected_name = (
@@ -1021,12 +1052,24 @@ class CellonautGuiFileBrowserMixin(GuiMixin):
                 if idx < len(channel_names) and str(channel_names[idx]).strip()
                 else f"Channel {idx + 1}"
             )
-            if layer in old_by_layer:
-                image_def = dict(old_by_layer[layer])
-            elif idx < len(old_channel_defs) and str(
+            identity_matches = [
+                old_index
+                for old_index in old_identity_indices.get(detected_name.casefold(), [])
+                if old_index not in used_old_indices
+            ]
+            if len(identity_matches) == 1:
+                old_index = identity_matches[0]
+                image_def = dict(old_channel_defs[old_index])
+                used_old_indices.add(old_index)
+            elif layer in old_by_layer and old_by_layer[layer] not in used_old_indices:
+                old_index = old_by_layer[layer]
+                image_def = dict(old_channel_defs[old_index])
+                used_old_indices.add(old_index)
+            elif idx < len(old_channel_defs) and idx not in used_old_indices and str(
                 old_channel_defs[idx].get("stack_channel_index", "") or ""
             ).strip() in {"", layer}:
                 image_def = dict(old_channel_defs[idx])
+                used_old_indices.add(idx)
             else:
                 image_def = self.create_default_image_definition(idx)
 

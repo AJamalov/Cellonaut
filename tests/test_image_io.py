@@ -283,14 +283,22 @@ def test_optional_physical_size_ignores_malformed_metadata():
 
 
 class _ImageDef:
-    def __init__(self, key: str, label: str, stack_channel_index=None, stack_source_image_key: str = ""):
+    def __init__(
+        self,
+        key: str,
+        label: str,
+        stack_channel_index=None,
+        stack_source_image_key: str = "",
+        folder_name: str = "",
+    ):
         self.key = key
         self.label = label
+        self.folder_name = folder_name or label
         self.stack_channel_index = stack_channel_index
         self.stack_source_image_key = stack_source_image_key
 
 
-def test_resolve_channel_indices_infers_flat_tiff_stack_layers_by_row_order(tmp_path):
+def test_resolve_channel_indices_rejects_unlabeled_pages_as_automatic_channels(tmp_path):
     if getattr(np, "__cellonaut_stub__", False):
         pytest.skip("numpy is stubbed in this lightweight test environment")
 
@@ -298,19 +306,17 @@ def test_resolve_channel_indices_infers_flat_tiff_stack_layers_by_row_order(tmp_
     tifffile.imwrite(path, np.zeros((3, 4, 5), dtype=np.uint16), photometric="minisblack")
     logs = []
 
-    result = resolve_channel_indices_for_file_map(
-        image_defs=[
-            _ImageDef("image1", "Channel 1"),
-            _ImageDef("image2", "Channel 2"),
-            _ImageDef("image3", "Channel 3"),
-        ],
-        file_map={"image1": path, "image2": path, "image3": path},
-        input_structure=STRUCTURE_FLAT_TIFFS,
-        log_func=logs.append,
-    )
-
-    assert result == {"image1": 1, "image2": 2, "image3": 3}
-    assert "Channel 1=layer 1" in logs[0]
+    with pytest.raises(ValueError, match="could represent channels or Z slices"):
+        resolve_channel_indices_for_file_map(
+            image_defs=[
+                _ImageDef("image1", "Channel 1"),
+                _ImageDef("image2", "Channel 2"),
+                _ImageDef("image3", "Channel 3"),
+            ],
+            file_map={"image1": path, "image2": path, "image3": path},
+            input_structure=STRUCTURE_FLAT_TIFFS,
+            log_func=logs.append,
+        )
 
 
 def test_resolve_channel_indices_keeps_explicit_and_non_flat_values(tmp_path):
@@ -330,32 +336,31 @@ def test_resolve_channel_indices_keeps_explicit_and_non_flat_values(tmp_path):
     assert result == {"image1": 2, "image2": None}
 
 
-def test_resolve_channel_indices_avoids_explicit_layers_for_automatic_channels(tmp_path):
+def test_resolve_channel_indices_requires_all_unlabeled_page_layers_to_be_explicit(tmp_path):
     path = tmp_path / "sample.tif"
     tifffile.imwrite(path, np.zeros((3, 4, 5), dtype=np.uint16), photometric="minisblack")
 
-    result = resolve_channel_indices_for_file_map(
-        image_defs=[
-            _ImageDef("image1", "Channel 1", 2),
-            _ImageDef("image2", "Channel 2"),
-            _ImageDef("image3", "Channel 3"),
-        ],
-        file_map={"image1": path, "image2": path, "image3": path},
-        input_structure=STRUCTURE_FLAT_TIFFS,
-        log_func=lambda _msg: None,
-    )
+    with pytest.raises(ValueError, match="could represent channels or Z slices"):
+        resolve_channel_indices_for_file_map(
+            image_defs=[
+                _ImageDef("image1", "Channel 1", 2),
+                _ImageDef("image2", "Channel 2"),
+                _ImageDef("image3", "Channel 3"),
+            ],
+            file_map={"image1": path, "image2": path, "image3": path},
+            input_structure=STRUCTURE_FLAT_TIFFS,
+            log_func=lambda _msg: None,
+        )
 
-    assert result == {"image1": 2, "image2": 1, "image3": 3}
 
-
-def test_resolve_channel_indices_does_not_count_mask_only_rows(tmp_path):
+def test_resolve_channel_indices_does_not_count_mask_only_rows_for_explicit_pages(tmp_path):
     path = tmp_path / "sample.tif"
     tifffile.imwrite(path, np.zeros((2, 4, 5), dtype=np.uint16), photometric="minisblack")
 
     result = resolve_channel_indices_for_file_map(
         image_defs=[
-            _ImageDef("image1", "Channel 1"),
-            _ImageDef("image2", "Channel 2"),
+            _ImageDef("image1", "Channel 1", 1),
+            _ImageDef("image2", "Channel 2", 2),
             _ImageDef("mask1", "Channel 1 mask", stack_source_image_key="image1"),
         ],
         file_map={"image1": path, "image2": path, "mask1": path},
@@ -364,6 +369,57 @@ def test_resolve_channel_indices_does_not_count_mask_only_rows(tmp_path):
     )
 
     assert result == {"image1": 1, "image2": 2, "mask1": 1}
+
+
+def test_resolve_channel_indices_treats_unlabeled_pages_as_z_for_one_channel(tmp_path):
+    path = tmp_path / "sample.tif"
+    tifffile.imwrite(path, np.arange(3 * 4 * 5, dtype=np.uint16).reshape(3, 4, 5), photometric="minisblack")
+    logs = []
+
+    result = resolve_channel_indices_for_file_map(
+        image_defs=[_ImageDef("image1", "mCherry", 2)],
+        file_map={"image1": path},
+        input_structure=STRUCTURE_FLAT_TIFFS,
+        log_func=logs.append,
+    )
+
+    assert result == {"image1": None}
+    assert "treating it as a Z stack" in logs[0]
+
+
+def test_resolve_channel_indices_corrects_saved_layer_from_ome_channel_name(tmp_path):
+    path = tmp_path / "sample.ome.tif"
+    tifffile.imwrite(
+        path,
+        np.zeros((2, 4, 5), dtype=np.uint16),
+        ome=True,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["DAPI", "mCherry"]}},
+    )
+    logs = []
+
+    result = resolve_channel_indices_for_file_map(
+        image_defs=[
+            _ImageDef("image1", "mCherry", 1),
+            _ImageDef("image2", "DAPI", 2),
+        ],
+        file_map={"image1": path, "image2": path},
+        input_structure=STRUCTURE_FLAT_TIFFS,
+        log_func=logs.append,
+    )
+
+    assert result == {"image1": 2, "image2": 1}
+    assert any("Corrected TIFF channel mapping for mCherry" in message for message in logs)
+
+
+def test_read_tiff_rejects_multiple_series_instead_of_silently_using_first(tmp_path):
+    path = tmp_path / "scenes.tif"
+    with tifffile.TiffWriter(path) as writer:
+        writer.write(np.ones((4, 5), dtype=np.uint16))
+        writer.write(np.ones((6, 7), dtype=np.uint16))
+
+    with pytest.raises(ValueError, match="contains 2 image series"):
+        read_tiff_numpy_2d(path)
 
 
 def test_stage_image_removes_partial_copy_when_cancelled(tmp_path, monkeypatch):

@@ -88,7 +88,7 @@ def test_help_content_does_not_duplicate_the_guided_tutorial():
 def test_help_content_preserves_scientific_and_legal_limits():
     text = help_text()
     for expected in (
-        "Multiple timepoints and XY positions use the first one",
+        "For multiple timepoints or XY positions, choose the one to export",
         "RGB",
         "output folder <b>outside it</b>",
         "ImageScience must be installed separately",

@@ -461,6 +461,36 @@ class CellonautGuiBuildMixin(CellonautGuiPipelineBuildMixin):
         self.nd2_detected_channels_label = QLabel("Waiting for files...")
         self.nd2_detected_channels_label.setWordWrap(True)
 
+        self.nd2_position_row = QWidget()
+        nd2_position_layout = QHBoxLayout(self.nd2_position_row)
+        nd2_position_layout.setContentsMargins(0, 0, 0, 0)
+        nd2_position_layout.setSpacing(8)
+        nd2_position_label = QLabel("XY position")
+        nd2_position_label.setMinimumWidth(150)
+        nd2_position_label.setMaximumWidth(150)
+        self.nd2_position_spin = QSpinBox()
+        self.nd2_position_spin.setRange(1, 10000)
+        self.nd2_position_spin.setValue(1)
+        self.nd2_position_spin.setToolTip("XY position to export, starting at 1.")
+        self.nd2_position_spin.valueChanged.connect(self.on_nd2_acquisition_index_changed)
+        nd2_position_layout.addWidget(nd2_position_label)
+        nd2_position_layout.addWidget(self.nd2_position_spin, 1)
+
+        self.nd2_time_row = QWidget()
+        nd2_time_layout = QHBoxLayout(self.nd2_time_row)
+        nd2_time_layout.setContentsMargins(0, 0, 0, 0)
+        nd2_time_layout.setSpacing(8)
+        nd2_time_label = QLabel("Timepoint")
+        nd2_time_label.setMinimumWidth(150)
+        nd2_time_label.setMaximumWidth(150)
+        self.nd2_time_spin = QSpinBox()
+        self.nd2_time_spin.setRange(1, 10000)
+        self.nd2_time_spin.setValue(1)
+        self.nd2_time_spin.setToolTip("Timepoint to export, starting at 1.")
+        self.nd2_time_spin.valueChanged.connect(self.on_nd2_acquisition_index_changed)
+        nd2_time_layout.addWidget(nd2_time_label)
+        nd2_time_layout.addWidget(self.nd2_time_spin, 1)
+
         self.nd2_z_mode = ComboRow(
             "Z handling",
             ["Max projection", "Single Z slice"],
@@ -498,6 +528,8 @@ class CellonautGuiBuildMixin(CellonautGuiPipelineBuildMixin):
         self.set_button_role(self.nd2_convert_button, "primary")
 
         self.nd2_group.add_widget(self.nd2_detected_channels_label)
+        self.nd2_group.add_widget(self.nd2_position_row)
+        self.nd2_group.add_widget(self.nd2_time_row)
         self.nd2_group.add_widget(self.nd2_z_mode)
         self.nd2_group.add_widget(self.nd2_z_index_row)
         self.nd2_group.add_widget(self.nd2_channel_rows_container)

@@ -37,6 +37,10 @@ class DummyNd2Gui(CellonautGuiNd2Mixin):
         self.nd2_z_mode = _ComboValue("Max projection")
         self.nd2_z_index_spin = _SpinValue(1)
         self.nd2_z_index_row = _Button()
+        self.nd2_position_spin = _SpinValue(1)
+        self.nd2_position_row = _Button()
+        self.nd2_time_spin = _SpinValue(1)
+        self.nd2_time_row = _Button()
 
     def update_nd2_visibility(self):
         pass
@@ -231,6 +235,33 @@ def test_collect_nd2_config_uses_selected_single_z_slice(tmp_path: Path, monkeyp
     assert gui.nd2_z_index_spin.range == (1, 5)
 
 
+def test_collect_nd2_config_uses_selected_position_and_timepoint(tmp_path: Path, monkeypatch):
+    source = tmp_path / "input"
+    output = tmp_path / "converted"
+    touch(source / "sample.nd2")
+    monkeypatch.setattr(
+        nd2_gui.ndi,
+        "inspect_nd2_file",
+        lambda _path: {
+            "name": "sample.nd2",
+            "channel_names": ["mCherry"],
+            "sizes": {"P": 3, "T": 4, "C": 1, "Y": 32, "X": 32},
+        },
+    )
+    gui = DummyNd2Gui(source, output)
+    gui.nd2_position_spin = _SpinValue(2)
+    gui.nd2_position_row = _Button()
+    gui.nd2_time_spin = _SpinValue(3)
+    gui.nd2_time_row = _Button()
+
+    cfg = gui.collect_nd2_config()
+
+    assert cfg.position_index == 1
+    assert cfg.time_index == 2
+    assert gui.nd2_position_spin.range == (1, 3)
+    assert gui.nd2_time_spin.range == (1, 4)
+
+
 def test_nd2_status_summary_reports_z_time_position_and_rgb_counts(tmp_path: Path):
     gui = DummyNd2Gui(tmp_path, tmp_path / "converted")
     gui.nd2_z_mode = _ComboValue("Max projection")
@@ -258,9 +289,9 @@ def test_nd2_status_summary_reports_z_time_position_and_rgb_counts(tmp_path: Pat
     assert "Z stacks: 2 file(s), 5-7 slices; 2 single-plane file(s); exporting max projection" in (
         gui.nd2_detected_channels_label.text
     )
-    assert "Timepoints: 3; exporting first" in gui.nd2_detected_channels_label.text
-    assert "Positions: 2; exporting first" in gui.nd2_detected_channels_label.text
-    assert "RGB components: 3; exporting first component" in gui.nd2_detected_channels_label.text
+    assert "Timepoints: 3; exporting timepoint 1" in gui.nd2_detected_channels_label.text
+    assert "Positions: 2; exporting position 1" in gui.nd2_detected_channels_label.text
+    assert "RGB components: 3; exporting component 1" in gui.nd2_detected_channels_label.text
     assert "Selected for export" not in gui.nd2_detected_channels_label.text
     assert "Status:" not in gui.nd2_detected_channels_label.text
     assert "Pipeline channels" not in gui.nd2_detected_channels_label.text

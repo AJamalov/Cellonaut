@@ -40,6 +40,10 @@ class ND2ImportConfig:
 
     z_index: int = 0
 
+    position_index: int = 0
+
+    time_index: int = 0
+
     strip_after_last_underscore: bool = False
 
     preserve_subfolders: bool = True
@@ -51,6 +55,12 @@ class ND2ImportConfig:
 
         if self.z_index < 0:
             raise ValueError("z_index must be >= 0.")
+
+        if self.position_index < 0:
+            raise ValueError("position_index must be >= 0.")
+
+        if self.time_index < 0:
+            raise ValueError("time_index must be >= 0.")
 
         if not self.channel_map:
             raise SetupError(SetupErrorCode.ND2_CHANNELS, "channel_map cannot be empty.")
@@ -431,18 +441,32 @@ def inspect_nd2_file(path: Path) -> dict[str, Any]:
 
 
 # Remove unsupported acquisition axes explicitly so remaining dimension names stay aligned with NumPy axes.
+def _take_axis(
+    array: np.ndarray,
+    dim_order: list[str],
+    dim_name: str,
+    index: int,
+) -> np.ndarray:
+    if dim_name not in dim_order:
+        if index != 0:
+            raise IndexError(f"Requested {dim_name} index {index}, but this ND2 file has no {dim_name} dimension.")
+        return array
+
+    axis = dim_order.index(dim_name)
+    count = array.shape[axis]
+    if not 0 <= index < count:
+        raise IndexError(f"Requested {dim_name} index {index}, but file only has {count} value(s).")
+    array = np.take(array, indices=index, axis=axis)
+    dim_order.pop(axis)
+    return array
+
+
 def _take_first_axis(
     array: np.ndarray,
     dim_order: list[str],
     dim_name: str,
 ) -> np.ndarray:
-    if dim_name not in dim_order:
-        return array
-
-    axis = dim_order.index(dim_name)
-    array = np.take(array, indices=0, axis=axis)
-    dim_order.pop(axis)
-    return array
+    return _take_axis(array, dim_order, dim_name, 0)
 
 
 # Select after position/time reduction so channel indices continue to match ND2 metadata.
@@ -511,10 +535,16 @@ def _ensure_2d_yx(
     return array
 
 
-def read_first_nd2_position(nd2_file: Any) -> np.ndarray:
-    """Load only the first XY position supported by the conversion workflow."""
+def read_nd2_position(nd2_file: Any, position_index: int = 0) -> np.ndarray:
+    """Load one explicitly selected XY position without materializing all positions."""
 
-    return np.asarray(nd2_file.asarray(position=0))
+    return np.asarray(nd2_file.asarray(position=int(position_index)))
+
+
+def read_first_nd2_position(nd2_file: Any) -> np.ndarray:
+    """Load position zero for preview paths that intentionally show the first position."""
+
+    return read_nd2_position(nd2_file, 0)
 
 
 # Reduce one channel to YX in named-axis order; P is position and S is an RGB sample component in python-nd2.
@@ -524,12 +554,13 @@ def _select_channel_plane(
     channel_index: int,
     z_mode: str,
     z_index: int,
+    time_index: int = 0,
 ) -> np.ndarray:
     dim_order = list(sizes.keys())
     work = arr
 
     work = _take_first_axis(work, dim_order, "P")
-    work = _take_first_axis(work, dim_order, "T")
+    work = _take_axis(work, dim_order, "T", time_index)
     work = _take_channel(work, dim_order, channel_index)
     work = _handle_z_dimension(work, dim_order, z_mode, z_index)
     work = _take_first_axis(work, dim_order, "S")
@@ -546,8 +577,8 @@ def export_nd2_file(
 ) -> list[Path]:
     """Write selected channels as one uncompressed CYX OME-TIFF; return its path in a list.
 
-    Export the first position, timepoint and RGB component. cfg.z_mode selects
-    a maximum projection or cfg.z_index (zero-based, unlike GUI TIFF indices).
+    Export the selected position and timepoint and the first RGB component.
+    cfg.z_mode selects a maximum projection or cfg.z_index (zero-based, unlike GUI TIFF indices).
     Channel order follows cfg.channel_map. Preserve pixel dtype and available
     spatial calibration; do not apply display normalization. Publication is
     exclusive, with numbered names on collision rather than overwriting a file.
@@ -572,15 +603,21 @@ def export_nd2_file(
 
         log_func(f"[ND2] Reading pixel data from {nd2_path.name} ...")
         check_cancel(should_cancel)
-        arr = read_first_nd2_position(f)
+        arr = read_nd2_position(f, cfg.position_index)
         check_cancel(should_cancel)
 
         log_func(f"[ND2] Detected channels: {channel_names}")
         log_func(f"[ND2] Export sample TIFF stack: {sample_name}")
+        selected_axes = {"P": cfg.position_index, "T": cfg.time_index, "S": 0}
         for key, label in (("P", "XY position"), ("T", "timepoint"), ("S", "RGB component")):
             count = int(sizes.get(key, 0) or 0)
             if count > 1:
-                log_func(f"[ND2] {label.capitalize()} count={count}; exporting index 0")
+                selected_index = selected_axes[key]
+                if selected_index >= count:
+                    raise IndexError(
+                        f"Requested {label} {selected_index + 1}, but {nd2_path.name} only has {count}."
+                    )
+                log_func(f"[ND2] {label.capitalize()} count={count}; exporting index {selected_index}")
 
         planes = []
         labels = []
@@ -597,6 +634,7 @@ def export_nd2_file(
                 channel_index=channel_index,
                 z_mode=cfg.z_mode,
                 z_index=cfg.z_index,
+                time_index=cfg.time_index,
             )
             planes.append(np.asarray(img2d))
             labels.append(str(channel_folder or channel_name))
@@ -608,7 +646,11 @@ def export_nd2_file(
         out_path = nd2_output_path(cfg, nd2_path, sample_name)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         reduction_notes = [f"z_mode={cfg.z_mode}", f"z_index={cfg.z_index}"]
-        for key, note in (("P", "position_index=0"), ("T", "time_index=0"), ("S", "rgb_component_index=0")):
+        for key, note in (
+            ("P", f"position_index={cfg.position_index}"),
+            ("T", f"time_index={cfg.time_index}"),
+            ("S", "rgb_component_index=0"),
+        ):
             if int(sizes.get(key, 0) or 0) > 1:
                 reduction_notes.append(note)
         stack = np.stack(planes, axis=0)

@@ -9,6 +9,8 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LEGACY_YEASTBUDDY_APP_ID = "9A7F3B1D-8E94-4E0A-A0F4-96FA6DCA7D10"
+CELLONAUT_APP_ID = "DE791F16-CF65-4E65-8D52-3604197F634A"
 
 
 def test_windows_release_scripts_include_user_facing_artifacts():
@@ -79,6 +81,18 @@ def test_windows_release_scripts_include_user_facing_artifacts():
     assert 'Name: "cellposecpu"' in spec_text
     assert "CELLPOSE_BACKEND.txt" in spec_text
     assert "WizardIsTaskSelected('cellposecpu')" in spec_text
+
+
+def test_cellonaut_installer_has_independent_identity_and_selectable_directory():
+    installer_spec = PROJECT_ROOT / "release_tools" / "installer" / "CellonautInstaller.iss"
+    spec_text = installer_spec.read_text(encoding="utf-8")
+
+    assert CELLONAUT_APP_ID != LEGACY_YEASTBUDDY_APP_ID
+    assert f"AppId={{{{{CELLONAUT_APP_ID}}}" in spec_text
+    assert LEGACY_YEASTBUDDY_APP_ID not in spec_text
+    assert "DefaultDirName={autopf}\\{#MyAppName}" in spec_text
+    assert "DisableDirPage=no" in spec_text
+    assert "UsePreviousAppDir=yes" in spec_text
 
 
 def test_windows_runtime_requirement_profiles_are_explicit():

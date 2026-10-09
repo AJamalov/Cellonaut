@@ -88,6 +88,10 @@ class CellonautGuiNd2Mixin(GuiMixin):
         self.nd2_channel_folder_state = {}
         if hasattr(self, "nd2_z_mode"):
             self.nd2_z_mode.set("Max projection")
+        for attr in ("nd2_position_spin", "nd2_time_spin"):
+            spin = getattr(self, attr, None)
+            if spin is not None:
+                spin.setValue(1)
         self.remember_nd2_scan_summary(nd2_count=0, first_display="", sizes={})
         self.suggest_output_folder_if_empty(getattr(self, "nd2_output_dir", None), text, "converted")
         self.rebuild_nd2_channel_rows()
@@ -161,6 +165,16 @@ class CellonautGuiNd2Mixin(GuiMixin):
         value = int(spin.value()) if spin is not None else 1
         return max(0, value - 1)
 
+    def nd2_backend_position_index(self) -> int:
+        spin = getattr(self, "nd2_position_spin", None)
+        value = int(spin.value()) if spin is not None else 1
+        return max(0, value - 1)
+
+    def nd2_backend_time_index(self) -> int:
+        spin = getattr(self, "nd2_time_spin", None)
+        value = int(spin.value()) if spin is not None else 1
+        return max(0, value - 1)
+
     def nd2_z_stack_summary(self) -> dict[str, int | bool]:
         return dict(getattr(self, "nd2_z_summary", {}) or {})
 
@@ -197,8 +211,41 @@ class CellonautGuiNd2Mixin(GuiMixin):
         spin.setToolTip(f"Slice to keep in every stack, starting at 1. Available: 1-{max_z}.")
         QTimer.singleShot(0, self.resize_nd2_dialog_to_content)
 
+    def update_nd2_acquisition_controls(self) -> None:
+        sizes = dict(getattr(self, "nd2_detected_sizes", {}) or {})
+        dataset_summary = dict(getattr(self, "nd2_dataset_summary", {}) or {})
+        for axis, spin_attr, row_attr, label in (
+            ("P", "nd2_position_spin", "nd2_position_row", "XY position"),
+            ("T", "nd2_time_spin", "nd2_time_row", "timepoint"),
+        ):
+            spin = getattr(self, spin_attr, None)
+            row = getattr(self, row_attr, None)
+            try:
+                detected_count = max(1, int(sizes.get(axis, 1) or 1))
+                selectable_count = max(
+                    1,
+                    int(dataset_summary.get(f"min_{axis.lower()}_count", detected_count) or detected_count),
+                )
+            except (TypeError, ValueError):
+                detected_count = selectable_count = 1
+            visible = detected_count > 1
+            if spin is not None:
+                spin.setRange(1, selectable_count)
+                spin.setEnabled(visible)
+                spin.setToolTip(
+                    f"{label.capitalize()} to export, starting at 1. "
+                    f"Every inspected file supports 1-{selectable_count}."
+                )
+            if row is not None:
+                row.setVisible(visible)
+                row.setEnabled(visible)
+
+    def on_nd2_acquisition_index_changed(self, *_args) -> None:
+        self.refresh_nd2_status_summary()
+
     def on_nd2_z_mode_changed(self, *_args):
         self.update_nd2_z_controls()
+        self.update_nd2_acquisition_controls()
         self.refresh_nd2_status_summary()
 
     def on_nd2_z_index_changed(self, *_args):
@@ -219,9 +266,12 @@ class CellonautGuiNd2Mixin(GuiMixin):
         self.nd2_z_summary = dict(z_summary or {})
         self.nd2_dataset_summary = dict(dataset_summary or {})
         self.update_nd2_z_controls()
+        self.update_nd2_acquisition_controls()
 
     def inspect_nd2_z_summary(self, nd2_files: list[Path], first_info: dict) -> dict[str, int | bool]:
         z_depths: list[int] = []
+        position_counts: list[int] = []
+        time_counts: list[int] = []
         error_count = 0
         metadata_error_count = 0
         issues: list[str] = []
@@ -232,6 +282,8 @@ class CellonautGuiNd2Mixin(GuiMixin):
                 sizes = dict(info.get("sizes", {}) or {})
                 channels = list(info.get("channel_names", []) or [])
                 z_depths.append(max(1, int(sizes.get("Z", 1) or 1)))
+                position_counts.append(max(1, int(sizes.get("P", 1) or 1)))
+                time_counts.append(max(1, int(sizes.get("T", 1) or 1)))
                 if channels != reference_channels:
                     error_count += 1
                     issues.append(f"{nd2_path.name}: channels {channels} do not match {reference_channels}.")
@@ -248,6 +300,10 @@ class CellonautGuiNd2Mixin(GuiMixin):
             "issue_count": error_count,
             "issues": issues[:8],
             "compatible": dataset_compatible,
+            "min_p_count": min(position_counts, default=1),
+            "max_p_count": max(position_counts, default=1),
+            "min_t_count": min(time_counts, default=1),
+            "max_t_count": max(time_counts, default=1),
         }
         return {
             "inspected_count": len(z_depths),
@@ -353,17 +409,18 @@ class CellonautGuiNd2Mixin(GuiMixin):
             if not bool(z_summary.get("complete", False)):
                 lines.append("Z metadata could not be read from every file; max projection is required.")
 
-        for key, label, export_text in (
-            ("T", "Timepoints", "exporting first"),
-            ("P", "Positions", "exporting first"),
-            ("S", "RGB components", "exporting first component"),
+        for key, label, selected_index in (
+            ("T", "Timepoints", self.nd2_backend_time_index()),
+            ("P", "Positions", self.nd2_backend_position_index()),
+            ("S", "RGB components", 0),
         ):
             try:
                 value = int(sizes.get(key, 0) or 0)
             except (TypeError, ValueError):
                 value = 0
             if value > 1:
-                lines.append(f"{label}: {value}; {export_text}")
+                noun = "component" if key == "S" else "timepoint" if key == "T" else "position"
+                lines.append(f"{label}: {value}; exporting {noun} {selected_index + 1}")
 
         return "\n".join(lines)
 
@@ -391,6 +448,7 @@ class CellonautGuiNd2Mixin(GuiMixin):
                 if callable(set_enabled):
                     set_enabled(has_nd2)
         self.update_nd2_z_controls()
+        self.update_nd2_acquisition_controls()
 
     # Apply background-scan results on the GUI thread and preserve user channel names for matching channels.
     def apply_nd2_scan_result(self, result: dict):
@@ -707,6 +765,8 @@ class CellonautGuiNd2Mixin(GuiMixin):
             channel_map=channel_map,
             z_mode=self.nd2_backend_z_mode(),
             z_index=self.nd2_backend_z_index(),
+            position_index=self.nd2_backend_position_index(),
+            time_index=self.nd2_backend_time_index(),
             strip_after_last_underscore=False,
         )
 
