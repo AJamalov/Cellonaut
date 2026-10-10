@@ -125,8 +125,8 @@ def normalize_qc_filter_mode(value: str) -> str:
     return mapping.get(text, "Exclude if any filter fails")
 
 
-MINIMUM_IMAGE_COUNT = 1
-STARTUP_IMAGE_COUNT = 1
+MINIMUM_IMAGE_COUNT = 0
+STARTUP_IMAGE_COUNT = 0
 
 DEFAULT_MASK_SOURCE_MODE = "Weka classifier"
 MASK_SOURCE_MODE_WEKA = "Weka classifier"

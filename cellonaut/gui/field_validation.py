@@ -361,10 +361,10 @@ class CellonautGuiFieldValidationMixin(GuiMixin):
         ok = True
 
         for row_idx in range(table.rowCount()):
-            diameter_edit = table.cellWidget(row_idx, 5)
-            min_size_edit = table.cellWidget(row_idx, 6)
-            cellprob_edit = table.cellWidget(row_idx, 7)
-            flow_edit = table.cellWidget(row_idx, 8)
+            diameter_edit = table.cellWidget(row_idx, 4)
+            min_size_edit = table.cellWidget(row_idx, 5)
+            cellprob_edit = table.cellWidget(row_idx, 6)
+            flow_edit = table.cellWidget(row_idx, 7)
 
             ok = (
                 self.validate_number_field(

@@ -394,7 +394,7 @@ def test_analysis_filter_panel_loads_channel_context_and_existing_rules():
     assert gui.analysis_filters_panel.visible is True
     assert gui.analysis_measurements_panel.visible is True
     assert gui.analysis_filters_title.value == "GFP cell groups"
-    assert gui.analysis_filter_source_label.value == "Cellpose source: Brightfield · Cell-group target: Mask"
+    assert gui.analysis_filter_source_label.value == "Cellpose source: GFP · Cell-group target: Mask"
     assert gui.analysis_filter_target_mask_combo.currentData() == "Mask"
     assert gui.analysis_exclude_filtered_checkbox.checked is True
     assert gui.analysis_filter_mode_combo.value == "Exclude only if both fail"

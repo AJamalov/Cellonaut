@@ -4,8 +4,8 @@ from copy import deepcopy
 import json
 
 import pytest
-from PySide6.QtCore import QSignalBlocker
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtWidgets import QHeaderView, QPushButton
 
 from cellonaut.config.adapter import build_pipeline_config_from_gui_state
 from cellonaut.config.state import EditableGuiConfiguration
@@ -64,7 +64,7 @@ def test_commit_captures_each_editor_once_and_collection_is_read_only(window, mo
             return _original(*args, **kwargs)
 
         monkeypatch.setattr(window, name, record)
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "30")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "30")
     assert state.image_definitions[0]["cell_diameter"] == ""
     assert window.collect_gui_state().image_definitions[0].cell_diameter == ""
     window.commit_gui_edits()
@@ -86,8 +86,8 @@ def test_pending_editors_are_captured_by_immediate_preset_save(window, tmp_path)
     window.add_image_processing_step("rolling_ball_background")
     pending_text(window.image_processing_table.cellWidget(0, 2), "17")
     pending_text(window.image_processing_table.cellWidget(0, 3), "23")
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "30")
-    pending_text(window.cellpose_settings_table.cellWidget(1, 5), "")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "30")
+    pending_text(window.cellpose_settings_table.cellWidget(1, 4), "")
     checks = {str(cb.property("measurementKey")): cb for cb in window._inline_measurement_checks}
     with QSignalBlocker(checks["cell_area"]):
         checks["cell_area"].setChecked(True)
@@ -183,6 +183,43 @@ def test_one_cellpose_mask_can_measure_multiple_channel_rows(window):
     assert {target.cell_diameter for target in config.measurement_targets} == {41.0}
 
 
+def test_measurement_matrix_keeps_full_channel_names_and_uses_horizontal_scrolling(window):
+    channel_names = [
+        "Very long spinning disk channel name one",
+        "Very long spinning disk channel name two",
+        "Very long spinning disk channel name three",
+    ]
+    window.apply_preset_dict(
+        {
+            "image_definitions": [
+                {
+                    "name": name,
+                    "folder": name,
+                    "mask_slot_enabled": False,
+                    "analysis_cell_segmentation_enabled": True,
+                }
+                for name in channel_names
+            ]
+        },
+        schedule_scan=False,
+    )
+
+    table = window.analysis_matrix_table
+    headers = [table.horizontalHeaderItem(column).text() for column in range(table.columnCount())]
+    assert headers == [f"{name}_Cellpose" for name in channel_names]
+    assert table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    assert all(
+        table.horizontalHeader().sectionResizeMode(column) == QHeaderView.ResizeMode.ResizeToContents
+        for column in range(table.columnCount())
+    )
+    header_metrics = table.horizontalHeader().fontMetrics()
+    assert all(
+        table.columnWidth(column) >= header_metrics.horizontalAdvance(header)
+        for column, header in enumerate(headers)
+    )
+    assert sum(table.columnWidth(column) for column in range(table.columnCount())) > 700
+
+
 def test_each_enabled_cellpose_mask_can_be_selected_for_the_same_measured_channel(window):
     window.apply_preset_dict(
         {
@@ -229,7 +266,7 @@ def test_rename_commits_and_remaps_even_before_editing_finished(window, index, n
     definitions = saved["image_definitions"]
     assert definitions[index]["name"] == new_name
     assert definitions[2]["mask_source_channel"] == (new_name if index == 0 else "A")
-    assert definitions[0]["analysis_cell_segmentation_source"] == (new_name if index == 1 else "B")
+    assert definitions[0]["analysis_cell_segmentation_source"] == (new_name if index == 0 else "A")
     assert definitions[0]["analysis_cellpose_mask_source"] == (new_name if index == 0 else "A")
     target = new_name if index == 2 else "Mask"
     assert definitions[0]["mask_relationships"][target] is True
@@ -241,7 +278,7 @@ def test_rename_commits_and_remaps_even_before_editing_finished(window, index, n
 
 
 def test_preset_load_renders_owned_state_without_scraping_old_widgets(window, monkeypatch):
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "99")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "99")
     saved = {
         "input_dir": "another-dataset", "measurement_options": {"cell_area": True},
         "image_definitions": [{"name": "Loaded", "mask_slot_enabled": False, "cell_diameter": "12"}],
@@ -251,13 +288,32 @@ def test_preset_load_renders_owned_state_without_scraping_old_widgets(window, mo
     window.apply_preset_dict(saved, schedule_scan=False)
     assert calls == []
     assert window.configuration_state.image_definitions[0]["cell_diameter"] == "12"
-    assert window.cellpose_settings_table.cellWidget(0, 5).text() == "12"
+    assert window.cellpose_settings_table.cellWidget(0, 4).text() == "12"
     assert window.input_dir.get() == window.configuration_state.input_dir == "another-dataset"
     assert window.configuration_state.measurement_options["cell_area"] is True
     assert window.image_rows[0].name.get() == "Loaded"
     checks = {str(cb.property("measurementKey")): cb for cb in window._inline_measurement_checks}
     assert checks["cell_area"].isChecked() is True
     assert window.get_preset_dict()["measurement_options"]["cell_area"] is True
+
+
+def test_untouched_default_preset_remains_empty_and_clean(window):
+    window.apply_preset_dict(
+        {"image_definitions": []},
+        schedule_scan=False,
+    )
+    baseline = window.get_preset_dict()
+    window.remember_preset_state("Default", baseline)
+
+    window.commit_gui_edits()
+
+    assert window.get_preset_dict() == baseline
+    assert window.preset_has_unsaved_changes() is False
+    assert window.image_definitions == []
+    assert window.image_tabs.count() == 0
+    assert window.mask_source_tabs.count() == 0
+    assert window.mask_tabs.count() == 1
+    assert window.mask_tabs.isTabEnabled(0) is False
 
 
 def test_legacy_preset_migration_is_at_load_boundary(window):
@@ -276,10 +332,10 @@ def test_legacy_preset_migration_is_at_load_boundary(window):
 
 
 def test_execution_uses_detached_committed_snapshot(window):
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "30")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "30")
     window.commit_gui_edits()
     snapshot = window.collect_gui_state()
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "99")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "99")
     config = build_pipeline_config_from_gui_state(snapshot)
     assert config.measurement_targets[0].cell_diameter == 30
     assert config.measurement_targets[1].cell_diameter is None
@@ -308,7 +364,10 @@ def test_cell_group_edits_and_invalid_partial_input_preserve_consistent_state(wi
 def test_configuration_lifecycle_keeps_preview_ownership_separate(window):
     preview = window.preview_state
     preview.mask_adjustments_by_target["preview-only"] = {"dx": 3}
-    window.add_image_row()
+    extra_channel = window.create_default_image_definition(len(window.image_definitions))
+    extra_channel["mask_slot_enabled"] = False
+    window.image_definitions.append(extra_channel)
+    window.rebuild_image_rows(sync_from_ui=False)
     assert len(window.configuration_state.image_definitions) == 4
     window.remove_image_row_at(3)
     assert len(window.configuration_state.image_definitions) == 3
@@ -357,7 +416,7 @@ def test_commit_during_table_construction_preserves_configuration(window):
 def test_editing_and_saving_are_allowed_during_scan_but_execution_waits(window, tmp_path):
     window._pending_input_scan_path = window.input_dir.get()
     window._last_input_scan_result = {}
-    pending_text(window.cellpose_settings_table.cellWidget(0, 5), "30")
+    pending_text(window.cellpose_settings_table.cellWidget(0, 4), "30")
     window._save_preset_to_path(tmp_path / "pending.json", "Pending", created=True, notify=False, refresh=False)
     assert window.configuration_state.image_definitions[0]["cell_diameter"] == "30"
     with pytest.raises(ValueError, match="still being scanned"):

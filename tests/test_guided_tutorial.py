@@ -159,6 +159,27 @@ def test_tutorial_places_cursor_on_next_after_dialog_moves(qt_application, tmp_p
     gui._end_guided_tutorial()
 
 
+def test_tutorial_places_cursor_on_previous_after_navigating_back(qt_application, tmp_path, monkeypatch):
+    settings = QSettings(str(tmp_path / "tutorial.ini"), QSettings.Format.IniFormat)
+    gui = TutorialHarness(settings)
+    gui.resize(900, 650)
+    gui.show()
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    positions = []
+    monkeypatch.setattr(QCursor, "setPos", lambda point: positions.append(point))
+    gui.guided_tutorial_button.click()
+    gui._tutorial_next_button.click()
+    gui._tutorial_next_button.click()
+    qt_application.processEvents()
+
+    gui._tutorial_previous_button.click()
+    qt_application.processEvents()
+
+    expected = gui._tutorial_previous_button.mapToGlobal(gui._tutorial_previous_button.rect().center())
+    assert positions[-1] == expected
+    gui._end_guided_tutorial()
+
+
 def test_guided_tutorial_skip_and_decline(qt_application, tmp_path, monkeypatch):
     settings = QSettings(str(tmp_path / "tutorial.ini"), QSettings.Format.IniFormat)
     gui = TutorialHarness(settings)

@@ -95,11 +95,11 @@ def test_remap_analysis_references_preserves_relationships_after_renaming():
 
     remapped = remap_analysis_references(image_defs, ["Cell", "Tubules"], ["Nucleus", "ER"])
 
-    assert remapped[0]["analysis_cell_segmentation_source"] == "ER"
+    assert remapped[0]["analysis_cell_segmentation_source"] == "Nucleus"
     assert remapped[0]["mask_relationships"] == {"ER": True}
 
 
-def test_remap_analysis_references_preserves_ordered_cellpose_inputs():
+def test_remap_analysis_references_uses_enabled_rows_own_channel_for_cellpose():
     image_defs = [
         image_def(
             "Cell",
@@ -116,7 +116,7 @@ def test_remap_analysis_references_preserves_ordered_cellpose_inputs():
         ["Brightfield", "Green", "Red"],
     )
 
-    assert remapped[0]["analysis_cell_segmentation_sources"] == ["Brightfield", "Green", "Red"]
+    assert remapped[0]["analysis_cell_segmentation_sources"] == ["Brightfield"]
     assert remapped[0]["analysis_cell_segmentation_source"] == "Brightfield"
 
 

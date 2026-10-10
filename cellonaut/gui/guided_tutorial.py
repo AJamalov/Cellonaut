@@ -68,7 +68,12 @@ TUTORIAL_STEPS = (
     TutorialStep("Weka classes", "Class numbers follow the order saved in the Fiji model, starting at 1. Here, 1,2,3 selects three classes; each produces a separate mask.", "mask_classes", 1, "classes"),
     TutorialStep("Probability threshold", "Weka produces probability maps. This control uses a Fiji/ImageJ threshold method to turn them into masks. Preview a sample and check that the masks include the intended structures without including background.", "mask_threshold", 1),
     TutorialStep("Enable Cellpose", "Enable a channel to create one reusable Channel_Cellpose mask column. Other measured channels can use the same cells.", "cellpose_enable", 2, "cellpose_on"),
-    TutorialStep("Cellpose source and model", "Choose the image channel Cellpose should analyze and its model here.", "cellpose_settings_table", 2),
+    TutorialStep(
+        "Cellpose source and model",
+        "Cellpose analyzes the channel whose row is enabled. Select its model and segmentation settings here.",
+        "cellpose_settings_table",
+        2,
+    ),
     TutorialStep("Cellpose diameter", "Diameter rescales the image using a cell size in pixels. Blank keeps the original scale. The other columns control border removal, minimum area, probability and flow thresholds.", "cellpose_diameter", 2, "cellpose_diameter"),
     TutorialStep("Disable Cellpose", "This example uses Weka masks only, so disable Cellpose before continuing.", "cellpose_enable", 2, "cellpose_off"),
     TutorialStep("Before mask creation", "Apply the same processing used on your Weka training images. Drag steps to change their order; they run from top to bottom.", "image_processing_table", 3, "processing_add_before_mask"),
@@ -117,6 +122,7 @@ class GuidedTutorialMixin(GuiMixin):
         self._tutorial_highlighted_widget = None
         self._tutorial_highlight_frame = None
         self._tutorial_visual_revision = 0
+        self._tutorial_cursor_destination = "next"
         self._tutorial_geometry_timer = None
         self._tutorial_previous_browser_root = None
         self._tutorial_previous_browser_history = []
@@ -183,7 +189,7 @@ class GuidedTutorialMixin(GuiMixin):
             return cell.findChild(QPushButton) if cell is not None else None
         if name == "cellpose_diameter":
             table = getattr(self, "cellpose_settings_table", None)
-            return table.cellWidget(0, 5) if table is not None else None
+            return table.cellWidget(0, 4) if table is not None else None
         if name.endswith("_processing_enable"):
             table = getattr(self, name.removesuffix("_enable") + "_table", None)
             cell = table.cellWidget(0, 1) if table is not None else None
@@ -321,9 +327,14 @@ class GuidedTutorialMixin(GuiMixin):
                 return
         dialog.move(max(available.left(), min(top_left.x(), available.right() - dialog.width())), max(available.top(), min(bottom_right.y() + gap, available.bottom() - dialog.height())))
 
-    def _place_tutorial_cursor_on_next(self) -> None:
+    def _place_tutorial_cursor_on_navigation_button(self) -> None:
         dialog = self._tutorial_dialog
-        button = getattr(self, "_tutorial_next_button", None)
+        button_name = (
+            "_tutorial_previous_button"
+            if self._tutorial_cursor_destination == "previous"
+            else "_tutorial_next_button"
+        )
+        button = getattr(self, button_name, None)
         if dialog is not None and dialog.isVisible() and button is not None:
             QCursor.setPos(button.mapToGlobal(button.rect().center()))
 
@@ -581,6 +592,7 @@ class GuidedTutorialMixin(GuiMixin):
         self._suppress_input_path_scan = True
         self._tutorial_step = 0
         self._tutorial_phase = 0
+        self._tutorial_cursor_destination = "next"
         dialog = QDialog(self)
         dialog.setObjectName("GuidedTutorialDialog")
         dialog.setWindowTitle("Tutorial")
@@ -638,7 +650,7 @@ class GuidedTutorialMixin(GuiMixin):
             )
             frame_center = dialog.frameGeometry().center()
             dialog.move(dialog.pos() + center - frame_center)
-            self._place_tutorial_cursor_on_next()
+            self._place_tutorial_cursor_on_navigation_button()
             return
         if step.section is not None:
             self._show_tutorial_section(step.section)
@@ -665,7 +677,7 @@ class GuidedTutorialMixin(GuiMixin):
                     self._position_tutorial_dialog(target)
                 except RuntimeError:
                     return
-            self._place_tutorial_cursor_on_next()
+            self._place_tutorial_cursor_on_navigation_button()
 
         QTimer.singleShot(0, settle_layout)
 
@@ -677,7 +689,7 @@ class GuidedTutorialMixin(GuiMixin):
         if target is not self._tutorial_highlighted_widget:
             self._highlight_tutorial_target(target)
             self._position_tutorial_dialog(target)
-            self._place_tutorial_cursor_on_next()
+            self._place_tutorial_cursor_on_navigation_button()
             return
         if target is None:
             return
@@ -691,6 +703,7 @@ class GuidedTutorialMixin(GuiMixin):
             self._clear_tutorial_highlight()
 
     def _advance_guided_tutorial(self) -> None:
+        self._tutorial_cursor_destination = "next"
         step = TUTORIAL_STEPS[self._tutorial_step]
         if not step.action:
             if self._tutorial_step == len(TUTORIAL_STEPS) - 1:
@@ -729,6 +742,7 @@ class GuidedTutorialMixin(GuiMixin):
     def _previous_guided_tutorial_step(self) -> None:
         if self._tutorial_step <= 0 and self._tutorial_phase == 0:
             return
+        self._tutorial_cursor_destination = "previous"
         self._clear_tutorial_highlight()
         if self._tutorial_phase == 1:
             try:

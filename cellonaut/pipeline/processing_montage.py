@@ -701,7 +701,7 @@ def save_cellpose_montage_for_sample(
     selected_defs = list(cell_source_defs or ([] if cell_source_def is None else [cell_source_def]))
     if not selected_defs:
         return None
-    planes = []
+    planes: list[np.ndarray] = []
     for selected_def in selected_defs[:3]:
         source_img = image_map.get(getattr(selected_def, "key", ""))
         if source_img is None:

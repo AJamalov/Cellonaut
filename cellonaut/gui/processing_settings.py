@@ -411,6 +411,11 @@ class CellonautGuiProcessingSettingsMixin(
                 if steps and not str(steps[0].get("type", "") or "") and str(added_step.get("type", "") or ""):
                     steps[0] = added_step
                 else:
+                    if masks and not steps and not str(added_step.get("type", "") or ""):
+                        # The first empty row was only a visual placeholder and
+                        # was intentionally not committed. Clicking Add makes
+                        # that row explicit before appending the requested one.
+                        steps.append(dict(added_step))
                     steps.append(added_step)
             elif 0 <= step_index < len(steps):
                 steps.pop(step_index)
@@ -787,6 +792,7 @@ class CellonautGuiProcessingSettingsMixin(
                 "row_idx": step_index,
                 "step_type": str(step.get("type", "") or ""),
                 "enabled": self.merged_processing_step_enabled(mask_rows, mask_steps_by_source, step_index, step),
+                "synthetic": synthetic_mask_placeholder,
             }
             for step_index, step in enumerate(mask_steps)
         ]
@@ -873,6 +879,12 @@ class CellonautGuiProcessingSettingsMixin(
         previous_type = str(step_ref.get("step_type", "") or "")
         step_type = self.mask_settings_step_type_from_widget(step_selector, previous_type)
         if not step_type:
+            if bool(step_ref.get("synthetic", False)):
+                # The table shows one empty row as an Add-step affordance when
+                # the recipe is empty. It is UI scaffolding, not a persisted
+                # workflow step, and saving it would make an untouched preset
+                # appear dirty.
+                return None
             return {"type": "", "enabled": False, "row_enabled": False, "params": {}}
 
         definition = definitions.get(step_type)

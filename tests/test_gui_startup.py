@@ -340,6 +340,7 @@ def test_main_window_starts_and_closes_offscreen(monkeypatch):
         ]
         assert all(item is not None for item in cellpose_header_items)
         cellpose_headers = [item.text() for item in cellpose_header_items if item is not None]
+        assert "input" not in " ".join(cellpose_headers).lower()
         cellpose_header_metrics = window.cellpose_settings_table.horizontalHeader().fontMetrics()
         assert all(
             window.cellpose_settings_table.columnWidth(column)
@@ -347,10 +348,10 @@ def test_main_window_starts_and_closes_offscreen(monkeypatch):
             for column, header in enumerate(cellpose_headers)
         )
         assert cellpose_headers[-2:] == ["Probability threshold", "Flow threshold"]
-        assert window.cellpose_settings_table.columnWidth(4) < 180
-        assert all(not window.cellpose_settings_table.isColumnHidden(column) for column in range(9))
+        assert window.cellpose_settings_table.columnWidth(3) < 180
+        assert all(not window.cellpose_settings_table.isColumnHidden(column) for column in range(8))
         assert not hasattr(window, "cellpose_advanced_row")
-        assert window.analysis_matrix_table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        assert window.analysis_matrix_table.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
         assert window.analysis_matrix_table.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         assert window.pipeline_editor_header.isHidden() is True
         assert window.pipeline_overview_header.isHidden() is False
@@ -399,10 +400,13 @@ def test_main_window_starts_and_closes_offscreen(monkeypatch):
             )
         )
         window.preview_tools_tabs.setCurrentWidget(window.analysis_filters_panel)
-        assert window._inline_analysis_settings_panel == "filters"
+        assert not hasattr(window, "_inline_analysis_settings_panel")
         assert window.preview_tools_tabs.currentWidget() is window.analysis_filters_panel
         window.pipeline_back_button.click()
-        assert window.image_tabs.count() >= 2
+        assert window.image_tabs.count() == 0
+        assert window.mask_source_tabs.count() == 0
+        assert window.mask_tabs.count() == 1
+        assert window.mask_tabs.isTabEnabled(0) is False
         assert window.preview_scene is not None
         assert window.preview_toolbar.property("uiRole") == "toolbar"
         assert window.preview_artifact_selector.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
@@ -1149,6 +1153,7 @@ def test_default_preset_shows_lock_and_uses_save_as(monkeypatch, tmp_path):
 
     window = CellonautMainWindow()
     try:
+        default_before_save = json.loads((presets_dir / "Default.json").read_text(encoding="utf-8"))
         monkeypatch.setattr(window, "ensure_default_preset", lambda: None)
         window.refresh_presets_list(select_name="Default")
         default_index = window.preset_combo.findText("Default")
@@ -1168,7 +1173,7 @@ def test_default_preset_shows_lock_and_uses_save_as(monkeypatch, tmp_path):
         window.save_to_selected_preset()
 
         assert save_as_calls == [True]
-        assert json.loads((presets_dir / "Default.json").read_text(encoding="utf-8")) == {}
+        assert json.loads((presets_dir / "Default.json").read_text(encoding="utf-8")) == default_before_save
     finally:
         window.log_flush_timer.stop()
         window.close()
@@ -1323,11 +1328,15 @@ def test_cellpose_custom_model_can_be_browsed_and_cleared(monkeypatch, tmp_path)
     )
     window = CellonautMainWindow()
     try:
+        window.apply_preset_dict(
+            {"image_definitions": [{"name": "Signal", "folder": "Signal", "mask_slot_enabled": False}]},
+            schedule_scan=False,
+        )
         enable_cell = window.cellpose_settings_table.cellWidget(0, 0)
         enable = enable_cell.findChild(QPushButton)
         assert enable is not None
         enable.click()
-        custom_cell = window.cellpose_settings_table.cellWidget(0, 4)
+        custom_cell = window.cellpose_settings_table.cellWidget(0, 3)
         edit = custom_cell.findChild(QLineEdit, "CellposeCustomModelPath")
         browse = custom_cell.findChild(QPushButton, "CellposeCustomModelBrowse")
         clear = custom_cell.findChild(QPushButton, "CellposeCustomModelClear")
@@ -1339,7 +1348,7 @@ def test_cellpose_custom_model_can_be_browsed_and_cleared(monkeypatch, tmp_path)
         browse.click()
         assert window.image_definitions[0]["cellpose_custom_model_path"] == str(model_path)
 
-        custom_cell = window.cellpose_settings_table.cellWidget(0, 4)
+        custom_cell = window.cellpose_settings_table.cellWidget(0, 3)
         clear = custom_cell.findChild(QPushButton, "CellposeCustomModelClear")
         assert clear is not None and clear.isEnabled() is True
         clear.click()

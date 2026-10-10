@@ -45,51 +45,6 @@ class CellonautGuiDatasetMixin(
     CellonautGuiDatasetAnalysisMixin,
     CellonautGuiDatasetImagesMixin,
 ):
-    CELLPOSE_UNUSED_CHANNEL = "(none)"
-
-    def make_cellpose_input_channels_cell(
-        self,
-        names: list[str],
-        selected: list[str],
-    ) -> QWidget:
-        """Create three ordered channel selectors matching Cellpose 4's input."""
-        cell = QWidget()
-        cell.setProperty("uiRole", "matrixActionCell")
-        layout = QHBoxLayout(cell)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(3)
-        selected = list(dict.fromkeys(value for value in selected if value in names))[:3]
-        if not selected and names:
-            selected = [names[0]]
-        for slot in range(3):
-            combo = NoWheelComboBox()
-            combo.setProperty("cellposeInputSlot", slot)
-            combo.addItems(names if slot == 0 else [self.CELLPOSE_UNUSED_CHANNEL, *names])
-            value = selected[slot] if slot < len(selected) else self.CELLPOSE_UNUSED_CHANNEL
-            index = combo.findText(value)
-            combo.setCurrentIndex(index if index >= 0 else 0)
-            combo.setToolTip(
-                f"Cellpose input channel {slot + 1}. Channel order is preserved; "
-                "unused trailing channels should remain '(none)'."
-            )
-            combo.currentTextChanged.connect(self.on_cellpose_settings_table_changed)
-            layout.addWidget(combo, 1)
-        return cell
-
-    def cellpose_input_channels_from_cell(self, cell: QWidget | None) -> list[str]:
-        if cell is None:
-            return []
-        combos = sorted(
-            cell.findChildren(QComboBox),
-            key=lambda combo: int(combo.property("cellposeInputSlot") or 0),
-        )
-        values = [
-            combo.currentText().strip()
-            for combo in combos
-            if combo.currentText().strip() and combo.currentText().strip() != self.CELLPOSE_UNUSED_CHANNEL
-        ]
-        return list(dict.fromkeys(values))[:3]
-
     def make_cellpose_custom_model_cell(self, value: object) -> QWidget:
         cell = QWidget()
         cell.setProperty("uiRole", "matrixActionCell")
@@ -181,7 +136,6 @@ class CellonautGuiDatasetMixin(
         headers = [
             "Enable",
             "Remove border",
-            "Cellpose input channels (ordered)",
             "Cellpose model",
             "Custom model",
             "Diameter (px)",
@@ -195,9 +149,8 @@ class CellonautGuiDatasetMixin(
         table.setVerticalHeaderLabels(names)
         table.setHorizontalHeaderLabels(headers)
         header_help = [
-            "Create one reusable Cellpose mask for this channel. It becomes a Channel_Cellpose column in Measurements.",
+            "Run Cellpose on this channel and create one reusable Channel_Cellpose mask in Measurements.",
             "Leave out partial cells that touch the image boundary.",
-            "One to three ordered image channels supplied to Cellpose. The first channel is also used for cell QC intensity.",
             "Built-in Cellpose model used for segmentation.",
             "Optional compatible Cellpose 4 model file; this overrides the built-in model.",
             "Cell diameter in pixels used for rescaling. Blank keeps the original image scale.",
@@ -209,7 +162,7 @@ class CellonautGuiDatasetMixin(
             header_item = table.horizontalHeaderItem(column)
             if header_item is not None:
                 header_item.setToolTip(tooltip)
-        minimum_widths = [68, 96, 330, 112, 140, 82, 126, 126, 104]
+        minimum_widths = [68, 96, 112, 140, 82, 126, 126, 104]
         header_metrics = table.horizontalHeader().fontMetrics()
         for column, (header_text, minimum_width) in enumerate(zip(headers, minimum_widths, strict=True)):
             table.setColumnWidth(column, max(minimum_width, header_metrics.horizontalAdvance(header_text) + 28))
@@ -218,7 +171,7 @@ class CellonautGuiDatasetMixin(
             is_enabled = bool(image_def.get("analysis_cell_segmentation_enabled", False))
             enable_button = self.make_processing_enabled_button(
                 is_enabled,
-                "Create a reusable Cellpose whole-cell mask owned by this channel.",
+                "Run Cellpose on this channel and create a reusable whole-cell mask.",
             )
             enable_button.toggled.connect(self.on_cellpose_settings_table_changed)
             enable_widget = QWidget()
@@ -234,17 +187,6 @@ class CellonautGuiDatasetMixin(
             remove_border_cb.clicked.connect(self.on_cellpose_settings_table_changed)
             table.setCellWidget(row_idx, 1, remove_border_cb)
 
-            selected_sources = list(image_def.get("analysis_cell_segmentation_sources", []) or [])
-            if not selected_sources:
-                selected_sources = [
-                    str(image_def.get("analysis_cell_segmentation_source", names[row_idx]) or names[row_idx])
-                ]
-            table.setCellWidget(
-                row_idx,
-                2,
-                self.make_cellpose_input_channels_cell(names, selected_sources),
-            )
-
             model_combo = NoWheelComboBox()
             model_combo.addItems(CELLPOSE_MODEL_OPTIONS)
             model_value = str(
@@ -257,11 +199,11 @@ class CellonautGuiDatasetMixin(
                 "segmentation on low-contrast images."
             )
             model_combo.currentTextChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 3, model_combo)
+            table.setCellWidget(row_idx, 2, model_combo)
 
             table.setCellWidget(
                 row_idx,
-                4,
+                3,
                 self.make_cellpose_custom_model_cell(image_def.get("cellpose_custom_model_path", "")),
             )
 
@@ -270,14 +212,14 @@ class CellonautGuiDatasetMixin(
             diameter_edit.setPlaceholderText("")
             diameter_edit.setToolTip(CELLPOSE_DIAMETER_HELP)
             diameter_edit.textChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 5, diameter_edit)
+            table.setCellWidget(row_idx, 4, diameter_edit)
 
             min_size_edit = QLineEdit(
                 str(image_def.get("cell_min_size", DEFAULT_CELL_MIN_SIZE) or DEFAULT_CELL_MIN_SIZE)
             )
             min_size_edit.setToolTip("Smallest accepted cell area. Cellpose uses 15 px² by default.")
             min_size_edit.textChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 6, min_size_edit)
+            table.setCellWidget(row_idx, 5, min_size_edit)
 
             cellprob_edit = QLineEdit(
                 str(image_def.get("cellprob_threshold", DEFAULT_CELLPROB_THRESHOLD) or DEFAULT_CELLPROB_THRESHOLD)
@@ -286,7 +228,7 @@ class CellonautGuiDatasetMixin(
                 "Lower to include more pixels and find more or larger cells. Higher is more selective."
             )
             cellprob_edit.textChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 7, cellprob_edit)
+            table.setCellWidget(row_idx, 6, cellprob_edit)
 
             flow_edit = QLineEdit(
                 str(image_def.get("flow_threshold", DEFAULT_FLOW_THRESHOLD) or DEFAULT_FLOW_THRESHOLD)
@@ -295,7 +237,7 @@ class CellonautGuiDatasetMixin(
                 "Lower positive values reject more inconsistent cell shapes. Higher keeps more; 0 disables this check."
             )
             flow_edit.textChanged.connect(self.on_cellpose_settings_table_changed)
-            table.setCellWidget(row_idx, 8, flow_edit)
+            table.setCellWidget(row_idx, 7, flow_edit)
             self.set_cellpose_row_active_state(table, row_idx, is_enabled)
 
         for column in range(len(headers)):
@@ -352,20 +294,18 @@ class CellonautGuiDatasetMixin(
             if rb_cb is not None:
                 image_def["cell_remove_border"] = bool(rb_cb.isChecked())
 
-            segmentation_sources = self.cellpose_input_channels_from_cell(table.cellWidget(row_idx, 2))
-            if not segmentation_sources:
-                segmentation_sources = [str(image_def.get("name", "") or "").strip()]
-            image_def["analysis_cell_segmentation_sources"] = segmentation_sources
-            image_def["analysis_cell_segmentation_source"] = segmentation_sources[0]
+            channel_name = str(image_def.get("name", "") or "").strip()
+            image_def["analysis_cell_segmentation_sources"] = [channel_name] if channel_name else []
+            image_def["analysis_cell_segmentation_source"] = channel_name
 
-            model_combo = table.cellWidget(row_idx, 3)
+            model_combo = table.cellWidget(row_idx, 2)
             image_def["cellpose_model_type"] = (
                 model_combo.currentText()
                 if model_combo is not None
                 else str(image_def.get("cellpose_model_type", DEFAULT_CELLPOSE_MODEL_TYPE))
             )
 
-            custom_model_cell = table.cellWidget(row_idx, 4)
+            custom_model_cell = table.cellWidget(row_idx, 3)
             custom_model_edit = custom_model_cell.findChild(QLineEdit) if custom_model_cell is not None else None
             image_def["cellpose_custom_model_path"] = (
                 custom_model_edit.text().strip()
@@ -373,28 +313,28 @@ class CellonautGuiDatasetMixin(
                 else str(image_def.get("cellpose_custom_model_path", ""))
             )
 
-            diameter_edit = table.cellWidget(row_idx, 5)
+            diameter_edit = table.cellWidget(row_idx, 4)
             image_def["cell_diameter"] = (
                 diameter_edit.text().strip()
                 if diameter_edit is not None
                 else str(image_def.get("cell_diameter", DEFAULT_CELL_DIAMETER))
             )
 
-            min_size_edit = table.cellWidget(row_idx, 6)
+            min_size_edit = table.cellWidget(row_idx, 5)
             image_def["cell_min_size"] = (
                 min_size_edit.text().strip()
                 if min_size_edit is not None
                 else str(image_def.get("cell_min_size", DEFAULT_CELL_MIN_SIZE))
             )
 
-            cellprob_edit = table.cellWidget(row_idx, 7)
+            cellprob_edit = table.cellWidget(row_idx, 6)
             image_def["cellprob_threshold"] = (
                 cellprob_edit.text().strip()
                 if cellprob_edit is not None
                 else str(image_def.get("cellprob_threshold", DEFAULT_CELLPROB_THRESHOLD))
             )
 
-            flow_edit = table.cellWidget(row_idx, 8)
+            flow_edit = table.cellWidget(row_idx, 7)
             image_def["flow_threshold"] = (
                 flow_edit.text().strip()
                 if flow_edit is not None
@@ -453,9 +393,10 @@ class CellonautGuiDatasetMixin(
         table.setColumnCount(len(target_rows) + len(cellpose_rows))
         table.setHorizontalHeaderLabels([*target_names, *(f"{name}_Cellpose" for name in cellpose_names)])
         table.setVerticalHeaderLabels(source_names)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        table.horizontalHeader().setMinimumSectionSize(88)
+        table.horizontalHeader().setMinimumSectionSize(72)
+        table.horizontalHeader().setStretchLastSection(False)
 
         for row_idx, (_source_index, source_def) in enumerate(source_rows):
             row_has_mask = self.analysis_row_has_active_mask(source_def)
@@ -509,7 +450,8 @@ class CellonautGuiDatasetMixin(
                 )
 
         for column in range(table.columnCount()):
-            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+            table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        table.resizeColumnsToContents()
         table.resizeRowsToContents()
         for row_idx in range(table.rowCount()):
             table.setRowHeight(row_idx, 40)
@@ -517,7 +459,7 @@ class CellonautGuiDatasetMixin(
             table,
             minimum=112,
             maximum=10_000,
-            reserve_horizontal_scrollbar=False,
+            reserve_horizontal_scrollbar=True,
         )
         table.blockSignals(False)
         self.update_analysis_matrix_warning_label()
@@ -642,8 +584,8 @@ class CellonautGuiDatasetMixin(
         for dspin in root.findChildren(QDoubleSpinBox):
             dspin.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    # Channel and mask tabs share the same final + behavior. Keeping the guard and
-    # re-entry handling together prevents one tab group from adding duplicate rows.
+    # Mask tabs use a final action tab. Keeping the guard and re-entry handling
+    # together prevents one click from adding duplicate mask rows.
     def _handle_definition_tab_changed(self, tabs, index: int, add_row):
         if self._rebuilding_image_tabs or getattr(self, "_adding_image_tab", False):
             return
@@ -662,7 +604,8 @@ class CellonautGuiDatasetMixin(
         self.build_analysis_matrix_for_current_source()
 
     def on_image_tab_changed(self, index: int):
-        self._handle_definition_tab_changed(getattr(self, "image_tabs", None), index, self.add_image_row)
+        if not self._rebuilding_image_tabs and index >= 0:
+            self.build_analysis_matrix_for_current_source()
 
     def on_mask_tab_changed(self, index: int):
         self._handle_definition_tab_changed(getattr(self, "mask_tabs", None), index, self.add_mask_row)
@@ -684,7 +627,7 @@ class CellonautGuiDatasetMixin(
     def on_mask_tab_clicked(self, index: int):
         """Let the sole mask + tab add a row even though its index cannot change."""
         tabs = getattr(self, "mask_tabs", None)
-        if tabs is not None and tabs.count() == 1 and index == 0:
+        if tabs is not None and tabs.count() == 1 and index == 0 and tabs.isTabEnabled(index):
             self._handle_definition_tab_changed(tabs, index, self.add_mask_row)
 
     # Tabs mirror editable display names; update both channel and mask views when
@@ -700,7 +643,7 @@ class CellonautGuiDatasetMixin(
             return
         title = row.name.get().strip() or row.default_name
         channel_tab_index = row.channel_tab_index
-        if hasattr(self, "image_tabs") and 0 <= channel_tab_index < self.image_tabs.count() - 1:
+        if hasattr(self, "image_tabs") and 0 <= channel_tab_index < self.image_tabs.count():
             self.image_tabs.setTabText(channel_tab_index, title)
         mask_tab_index = row.mask_tab_index
         if hasattr(self, "mask_tabs") and 0 <= mask_tab_index < self.mask_tabs.count() - 1:

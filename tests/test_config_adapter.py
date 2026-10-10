@@ -136,9 +136,10 @@ def test_pipeline_image_defaults_match_gui_mask_defaults():
 
     assert image.mask_processing_steps == []
     assert image.threshold_method == "Default"
-    assert "min_roi_area" not in default_image_definitions()[0]
-    assert "shift_x" not in default_image_definitions()[0]
-    assert "analyze_mask_skeleton" not in default_image_definitions()[0]
+    image_defaults = default_image_definition(0)
+    assert "min_roi_area" not in image_defaults
+    assert "shift_x" not in image_defaults
+    assert "analyze_mask_skeleton" not in image_defaults
 
 
 def test_bundled_default_preset_matches_runtime_defaults():
@@ -150,7 +151,7 @@ def test_bundled_default_preset_matches_runtime_defaults():
 
     assert preset["measurement_options"] == default_measurement_options()
     assert normalized_images == default_image_definitions()
-    assert {image["cellpose_model_type"] for image in normalized_images} == {DEFAULT_CELLPOSE_MODEL_TYPE}
+    assert normalized_images == []
     for removed_key in ("fiji_app_path", "nd2_output_dir", "nd2_z_mode", "nd2_z_index", "nd2_channel_folder_state"):
         assert removed_key not in preset
 
@@ -748,7 +749,7 @@ def test_config_conversion_preserves_cell_segmentation_settings(tmp_path: Path):
     assert target.source_image_key == "image1"
     assert target.do_cell_segmentation is True
     assert target.cell_segmentation_source == "image1"
-    assert target.cell_segmentation_sources == ["image1", "image2", "image3"]
+    assert target.cell_segmentation_sources == ["image1"]
     assert target.cell_diameter == 42.5
     assert target.cell_min_size == 321
     assert target.cell_use_gpu is True

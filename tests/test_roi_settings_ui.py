@@ -314,22 +314,22 @@ def test_cellpose_settings_disable_inputs_but_keep_enable_button_active():
     enable_host = table.cellWidget(0, 0)
     enable_button = enable_host.findChild(QPushButton)
     remove_border_button = table.cellWidget(0, 1)
-    source_combo = table.cellWidget(0, 2)
-    diameter_edit = table.cellWidget(0, 5)
+    model_combo = table.cellWidget(0, 2)
+    diameter_edit = table.cellWidget(0, 4)
 
     assert enable_button.isEnabled() is True
     assert enable_button.text() == ""
     assert isinstance(remove_border_button, MatrixToggleButton)
     assert remove_border_button.text() == "ON"
-    assert source_combo.isEnabled() is False
-    assert source_combo.property("processingRowState") == "inactive"
+    assert model_combo.isEnabled() is False
+    assert model_combo.property("processingRowState") == "inactive"
     assert diameter_edit.isEnabled() is False
     assert diameter_edit.property("processingRowState") == "inactive"
 
     enable_button.click()
 
-    assert source_combo.isEnabled() is True
-    assert source_combo.property("processingRowState") == "active"
+    assert model_combo.isEnabled() is True
+    assert model_combo.property("processingRowState") == "active"
     assert diameter_edit.isEnabled() is True
     assert diameter_edit.property("processingRowState") == "active"
 

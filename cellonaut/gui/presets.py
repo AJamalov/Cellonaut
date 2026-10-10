@@ -52,15 +52,16 @@ class CellonautGuiPresetMixin(GuiMixin):
 
         return data
 
-    # The Default preset is the recovery baseline. Recreate it when missing or
-    # unreadable so startup is never left without a valid configuration.
+    # The Default preset is the recovery baseline owned by the application.
+    # Keep the user-data copy synchronized with the bundled version so upgrades
+    # do not leave an obsolete startup workflow behind.
     def ensure_default_preset(self):
         self.ensure_presets_dir()
         path = self.preset_path_from_name(DEFAULT_PRESET_NAME)
+        existing_data = None
         if path.exists():
             try:
-                self._read_json_file(path)
-                return
+                existing_data = self._read_json_file(path)
             except Exception as exc:
                 self.log(f"[PRESETS][WARN] Default preset was unreadable and will be recreated: {exc}")
 
@@ -70,9 +71,14 @@ class CellonautGuiPresetMixin(GuiMixin):
                 default_data = self._read_json_file(bundled_path)
             except (OSError, json.JSONDecodeError, ValueError) as exc:
                 self.log(f"[PRESETS][WARN] Could not read the bundled Default preset: {exc}")
+                if existing_data is not None:
+                    return
                 default_data = self.get_default_preset_dict()
+            if existing_data == default_data:
+                return
             self._write_json_file(path, default_data)
-            self.log(f"Created default preset: {path}")
+            action = "Updated" if existing_data is not None else "Created"
+            self.log(f"{action} default preset: {path}")
         except Exception as e:
             self.log(f"Could not create default preset: {e}")
 

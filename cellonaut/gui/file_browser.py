@@ -935,6 +935,8 @@ class CellonautGuiFileBrowserMixin(GuiMixin):
             image_def["name"] = folder_name
             image_def["folder"] = folder_name
             image_def["stack_channel_index"] = ""
+            if index >= len(physical_defs):
+                image_def["mask_slot_enabled"] = False
             new_channels.append(image_def)
 
         mask_name_map: dict[str, str] = {}
@@ -1072,6 +1074,7 @@ class CellonautGuiFileBrowserMixin(GuiMixin):
                 used_old_indices.add(idx)
             else:
                 image_def = self.create_default_image_definition(idx)
+                image_def["mask_slot_enabled"] = False
 
             current_name = str(image_def.get("name", "") or "").strip()
             if (

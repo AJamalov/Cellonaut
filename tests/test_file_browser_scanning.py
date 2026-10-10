@@ -385,6 +385,20 @@ def test_folder_layout_applies_detected_names_to_generic_channel_rows(tmp_path: 
     assert {image_def["folder"] for image_def in browser.image_definitions} == {"GFP", "DAPI"}
 
 
+def test_folder_layout_creates_only_detected_channels_for_an_empty_project(tmp_path: Path):
+    for folder_name in ("GFP", "DAPI"):
+        channel_dir = tmp_path / folder_name
+        channel_dir.mkdir()
+        tifffile.imwrite(channel_dir / "sample_01.tif", np.zeros((2, 2), dtype=np.uint8))
+    browser = DummyFileBrowser()
+
+    browser.apply_detected_image_folders_from_input(str(tmp_path))
+
+    assert {image_def["name"] for image_def in browser.image_definitions} == {"DAPI", "GFP"}
+    assert all(image_def["is_mask_only"] is False for image_def in browser.image_definitions)
+    assert all(image_def["mask_slot_enabled"] is False for image_def in browser.image_definitions)
+
+
 def test_folder_layout_remaps_default_mask_relationships(tmp_path: Path):
     channel_dir = tmp_path / "GFP"
     channel_dir.mkdir()

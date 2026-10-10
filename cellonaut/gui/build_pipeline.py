@@ -130,8 +130,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         self.mask_tabs.currentChanged.connect(self.on_mask_tab_changed)
         self.mask_tabs.tabBarClicked.connect(self.on_mask_tab_clicked)
 
-        image_note = QLabel("Detected image channels appear here after you select an input folder.\n" \
-        "Use + to add one manually.")
+        image_note = QLabel("Image channels are detected automatically after you select an input folder.")
         image_note.setWordWrap(True)
         image_note.setProperty("muted", "true")
         image_note.setProperty("uiRole", "mutedLabel")
@@ -230,7 +229,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
 
         cellpose_note = QLabel(
             "Each enabled row creates one reusable Channel_Cellpose mask column in Measurements.\n"
-            "Choose the image channel Cellpose should use to find cells; any measured channel can reuse that mask."
+            "Cellpose runs on the enabled row's channel; any measured channel can reuse that mask."
         )
         cellpose_note.setWordWrap(True)
         cellpose_note.setProperty("muted", "true")
@@ -709,6 +708,7 @@ class CellonautGuiPipelineBuildMixin(GuiMixin):
         mask_adjust_export_layout.addLayout(mask_adjust_buttons)
         mask_adjust_layout.addWidget(self.mask_adjust_export_group)
         mask_adjust_layout.addStretch(1)
+        self.update_mask_adjustment_status()
 
     def _assemble_pipeline_sections(
         self,

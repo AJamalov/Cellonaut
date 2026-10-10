@@ -70,8 +70,8 @@ class ImageGuiState:
     cell_group_mask_source: str = ""
     analysis_cell_segmentation_enabled: bool = False
     analysis_cell_segmentation_source: str = ""
-    # Ordered Cellpose 4 inputs. The first entry remains the intensity source
-    # used for cell-level QC and backwards-compatible single-channel behavior.
+    # Legacy serialized fields retained for preset compatibility. Cellonaut now
+    # always sets both to this definition's own channel when Cellpose is enabled.
     analysis_cell_segmentation_sources: list[str] = field(default_factory=list)
     analysis_cellpose_mask_sources: list[str] = field(default_factory=list)
     # First selected mask retained for old presets and preview fallbacks.
@@ -212,31 +212,14 @@ class ImageGuiState:
             if base["analysis_cellpose_mask_sources"]
             else ""
         )
-        raw_segmentation_sources = base.get("analysis_cell_segmentation_sources", [])
-        segmentation_sources = (
-            [str(value).strip() for value in raw_segmentation_sources if str(value or "").strip()]
-            if isinstance(raw_segmentation_sources, (list, tuple))
-            else []
-        )
-        legacy_segmentation_source = str(base.get("analysis_cell_segmentation_source", "") or "").strip()
-        if isinstance(data, dict) and "analysis_cell_segmentation_sources" not in data:
-            segmentation_sources = [legacy_segmentation_source] if legacy_segmentation_source else []
-        elif not segmentation_sources and legacy_segmentation_source:
-            segmentation_sources = [legacy_segmentation_source]
-        segmentation_sources = list(dict.fromkeys(segmentation_sources))[:3]
-        base["analysis_cell_segmentation_sources"] = segmentation_sources
-        base["analysis_cell_segmentation_source"] = (
-            segmentation_sources[0] if segmentation_sources else legacy_segmentation_source
-        )
+        own_channel = str(base.get("name", "") or "").strip()
+        base["analysis_cell_segmentation_sources"] = [own_channel] if own_channel else []
+        base["analysis_cell_segmentation_source"] = own_channel
         operation = str(base.get("combined_mask_operation", DEFAULT_COMBINED_MASK_OPERATION) or "").strip().upper()
         base["combined_mask_operation"] = (
             operation if operation in COMBINED_MASK_OPERATION_OPTIONS else DEFAULT_COMBINED_MASK_OPERATION
         )
 
-        if not base.get("analysis_cell_segmentation_source"):
-            base["analysis_cell_segmentation_source"] = base["name"]
-        if not base.get("analysis_cell_segmentation_sources"):
-            base["analysis_cell_segmentation_sources"] = [base["analysis_cell_segmentation_source"]]
         if (
             isinstance(data, dict)
             and "analysis_cellpose_mask_sources" not in data

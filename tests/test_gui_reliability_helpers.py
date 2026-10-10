@@ -255,3 +255,26 @@ def test_ensure_default_preset_recreates_empty_default(tmp_path, monkeypatch):
 
     assert json.loads(path.read_text(encoding="utf-8")) == bundled_default
     assert any("Default preset was unreadable" in message for message in messages)
+
+
+def test_ensure_default_preset_updates_obsolete_valid_copy(tmp_path, monkeypatch):
+    path = tmp_path / "Default.json"
+    path.write_text(
+        json.dumps({"image_definitions": [{"name": "Channel 1", "folder": "Channel 1"}]}),
+        encoding="utf-8",
+    )
+    bundled_path = tmp_path / "BundledDefault.json"
+    bundled_default = {"image_definitions": [], "input_dir": "", "output_dir": ""}
+    bundled_path.write_text(json.dumps(bundled_default), encoding="utf-8")
+    gui = CellonautGuiConfigMixin()
+    messages = []
+
+    monkeypatch.setattr(gui, "ensure_presets_dir", lambda: None)
+    monkeypatch.setattr(gui, "preset_path_from_name", lambda _name: path)
+    monkeypatch.setattr("cellonaut.gui.presets.get_resource_path", lambda _path: bundled_path)
+    monkeypatch.setattr(gui, "log", messages.append, raising=False)
+
+    gui.ensure_default_preset()
+
+    assert json.loads(path.read_text(encoding="utf-8")) == bundled_default
+    assert any("Updated default preset" in message for message in messages)

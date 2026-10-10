@@ -569,32 +569,21 @@ def _build_measurement_targets(
                 continue
 
             numbers = parsed.cell_numbers[provider_index]
-            segmentation_source_names = list(
-                dict.fromkeys(
-                    str(name or "").strip()
-                    for name in provider.analysis_cell_segmentation_sources
-                    if str(name or "").strip()
-                )
-            )[:3]
-            if not segmentation_source_names:
-                segmentation_source_names = [
-                    str(provider.analysis_cell_segmentation_source or cellpose_mask_name).strip()
-                ]
-            segmentation_source_keys = [
-                label_to_key.get(name, label_to_key.get(cellpose_mask_name, source_key))
-                for name in segmentation_source_names
-            ]
+            # A Cellpose-enabled row always segments its own physical channel.
+            # The measurement matrix controls which other channels reuse that
+            # resulting mask; it does not change the segmentation input.
+            provider_source_key = label_to_key.get(cellpose_mask_name, source_key)
             targets.append(MeasurementTarget(
                 source_image_key=source_key,
                 overlay_base_image_key=source_key,
                 overlay_roi_keys=overlay_roi_keys,
                 do_cell_segmentation=do_cell_segmentation,
                 cell_segmentation_source=(
-                    segmentation_source_keys[0]
+                    provider_source_key
                     if do_cell_segmentation
                     else ""
                 ),
-                cell_segmentation_sources=(segmentation_source_keys if do_cell_segmentation else []),
+                cell_segmentation_sources=([provider_source_key] if do_cell_segmentation else []),
                 cell_segmentation_mask_source=(
                     label_to_key.get(cellpose_mask_name, source_key) if do_cell_segmentation else ""
                 ),

@@ -61,13 +61,7 @@
         "skewness_in_positive_area": false,
         "kurtosis_in_positive_area": false
     },
-    "image_definitions": [
-        {
-            "name": "Channel 1",
-            "folder": "Channel 1",
-            "classifier": ""
-        }
-    ],
+    "image_definitions": [],
     "input_dir": "",
     "output_dir": "",
     "mask_source_dir": ""

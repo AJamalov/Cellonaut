@@ -49,8 +49,9 @@ from cellonaut.io.imagej_runtime import inspect_weka_classifier
 class CellonautGuiDatasetImagesMixin(GuiMixin):
     """Rebuild channel and mask editors from canonical GUI state."""
 
-    # A pipeline always needs pixel data even when every configured analysis uses masks.
-    MINIMUM_CHANNEL_COUNT = 1
+    # Channels are discovered from the selected dataset. An untouched project
+    # therefore has no synthetic input row to confuse with real image data.
+    MINIMUM_CHANNEL_COUNT = 0
 
     # Sections are assembled in multiple builder modules; this keeps expansion
     # behavior independent of where the content widget was created.
@@ -419,7 +420,7 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
                     self.mask_source_tabs.removeTab(0)
                     if widget is not None:
                         widget.deleteLater()
-                available_sources = [*channel_names, "Combined masks"]
+                available_sources = [*channel_names, "Combined masks"] if channel_names else []
                 for source_name in available_sources:
                     self.mask_source_tabs.addTab(QWidget(self.mask_source_tabs), source_name)
                 for tab_index, source_name in enumerate(channel_names):
@@ -446,26 +447,33 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
                     )
                     self.mask_source_tabs.tabBar().setTabTextColor(tab_index, QColor(color))
                     self.mask_source_tabs.setTabToolTip(tab_index, f"{source_name}: {status}")
-                if selected_mask_source not in available_sources:
-                    selected_mask_source = channel_names[0] if channel_names else "Combined masks"
-                self._selected_mask_source_name = selected_mask_source
-                self.mask_source_tabs.setCurrentIndex(available_sources.index(selected_mask_source))
+                if available_sources:
+                    if selected_mask_source not in available_sources:
+                        selected_mask_source = channel_names[0]
+                    self._selected_mask_source_name = selected_mask_source
+                    self.mask_source_tabs.setCurrentIndex(available_sources.index(selected_mask_source))
+                else:
+                    self._selected_mask_source_name = ""
 
             self._build_image_definition_tabs(build_channel_tabs=rebuild_channel_tabs)
             if rebuild_channel_tabs:
-                channel_plus_tab = QWidget(self.image_tabs)
-                self.image_tabs.addTab(channel_plus_tab, "+")
-                self.image_tabs.setTabToolTip(self.image_tabs.count() - 1, "Add a new channel")
-
-                if self.image_tabs.count() > 1:
+                if self.image_tabs.count() > 0:
                     if current_channel_index < 0:
                         current_channel_index = 0
-                    current_channel_index = min(current_channel_index, self.image_tabs.count() - 2)
+                    current_channel_index = min(current_channel_index, self.image_tabs.count() - 1)
                     self.image_tabs.setCurrentIndex(current_channel_index)
 
             mask_plus_tab = QWidget(self.mask_tabs)
             self.mask_tabs.addTab(mask_plus_tab, "Add mask")
-            self.mask_tabs.setTabToolTip(self.mask_tabs.count() - 1, "Add a mask to the selected image")
+            mask_plus_index = self.mask_tabs.count() - 1
+            has_channels = bool(channel_names)
+            self.mask_tabs.setTabEnabled(mask_plus_index, has_channels)
+            self.mask_tabs.setTabToolTip(
+                mask_plus_index,
+                "Add a mask to the selected image"
+                if has_channels
+                else "Select an input dataset so Cellonaut can detect its channels first",
+            )
 
             if self.mask_tabs.count() > 1:
                 if current_mask_index < 0:
@@ -831,22 +839,6 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
             combined_operation_combo.currentTextChanged.connect(self.on_image_definitions_changed)
             combined_operation_combo.currentTextChanged.connect(lambda *_args, fn=update_roi_status_label: fn())
 
-    # Save current edits before rebuilding the rows.
-    def add_image_row(self):
-        if self._rebuilding_image_tabs:
-            return
-
-        self.commit_gui_edits()
-        image_def = self.create_default_image_definition(len(self.image_definitions))
-        image_def["mask_slot_enabled"] = False
-        self.image_definitions.append(image_def)
-        self.rebuild_image_rows(sync_from_ui=False)
-
-        if hasattr(self, "image_tabs") and self.image_tabs.count() >= 2:
-            self.image_tabs.blockSignals(True)
-            self.image_tabs.setCurrentIndex(self.image_tabs.count() - 2)
-            self.image_tabs.blockSignals(False)
-
     # The selected image tab supplies the source relationship. Combined masks
     # stay global because they can use masks from several images.
     def add_mask_row(self):
@@ -854,9 +846,11 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
             return
 
         self.commit_gui_edits()
+        channel_names = self.get_channel_assignment_options(self.image_definitions)
+        if not channel_names:
+            return
         selected_source = str(getattr(self, "_selected_mask_source_name", "") or "")
         combined = selected_source == "Combined masks"
-        channel_names = self.get_channel_assignment_options(self.image_definitions)
         assigned_channel = "" if combined else selected_source
         if assigned_channel not in channel_names:
             assigned_channel = channel_names[0] if channel_names else ""
@@ -936,10 +930,6 @@ class CellonautGuiDatasetImagesMixin(GuiMixin):
     def refresh_channel_name_dependent_ui(self):
         if self._rebuilding_image_tabs:
             return
-
-        names = self.get_image_display_names()
-        if not names:
-            names = ["Channel 1"]
 
         if hasattr(self, "overlay_roi_list"):
             selected = {item.text() for item in self.overlay_roi_list.selectedItems()}
