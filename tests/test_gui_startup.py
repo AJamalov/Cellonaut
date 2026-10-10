@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from cellonaut import __version__
 from cellonaut.gui.main_window import CellonautMainWindow
 from cellonaut.gui import build as build_gui
 from cellonaut.gui import config as config_gui
@@ -1772,7 +1773,7 @@ def test_runtime_status_summarizes_application_versions(monkeypatch, tmp_path):
     window = CellonautMainWindow()
     try:
         html = window.runtime_installation_summary_html(str(tmp_path / "Fiji.app"))
-        assert "Cellonaut 1.0.1" in html
+        assert f"Cellonaut {__version__}" in html
         assert "Cellpose:</b>" in html
         assert "PyTorch:</b>" in html
         assert "Installation:" not in html

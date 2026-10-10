@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import re
@@ -11,14 +12,20 @@ import subprocess
 import tempfile
 import urllib.request
 import zipfile
+from xml.etree import ElementTree
 from pathlib import Path
 
 from cellonaut.io.fiji_installation import (
+    BIOP_IMAGE_LOADER_SERVICE,
     IMAGE_SCIENCE_CLASS,
+    MASTODON_PLUGIN_API,
     find_fiji_launcher,
     find_jar_containing_class,
+    find_jars_containing_classes,
+    requires_clean_fiji_runtime,
     scan_fiji_installation,
 )
+from cellonaut.io.java_runtime import is_supported_java_home, java_major_version
 
 
 CELLPOSE_MODEL_NAMES = ("cpsam", "cpsam_v2")
@@ -28,6 +35,12 @@ CELLPOSE_REPOSITORY_URL = "https://huggingface.co/mouseland/cellpose-sam"
 CELLPOSE_MODEL_BASE_URL = f"{CELLPOSE_REPOSITORY_URL}/resolve/{CELLPOSE_MODEL_REVISION}"
 FIJI_ARCHIVE_ROOT = "https://downloads.imagej.net/fiji/archive/latest/20260718-0417"
 FIJI_ARCHIVE_NAME = "fiji-latest-win64-jdk.zip"
+MASTODON_UPDATE_SITE_NAME = "Mastodon"
+MASTODON_UPDATE_SITE_URL = "https://sites.imagej.net/Mastodon-jungle/"
+JAVA_RUNTIME_ARCHIVE_NAME = "zulu11.90.19-ca-jre11.0.32-win_x64.zip"
+JAVA_RUNTIME_ROOT_NAME = "zulu11.90.19-ca-jre11.0.32-win_x64"
+JAVA_RUNTIME_URL = f"https://cdn.azul.com/zulu/bin/{JAVA_RUNTIME_ARCHIVE_NAME}"
+JAVA_RUNTIME_SHA256 = "7a9998963ea449b647fb57a7bad425639ff50f7c0e08bd5f00572b6486ccac86"
 PYIMAGEJ_BRIDGE_ARTIFACTS = {
     "imglib2-imglyb-1.1.0.jar": (
         "https://maven.imagej.net/content/repositories/releases/net/imglib2/"
@@ -176,18 +189,89 @@ def _safe_extract_zip(archive: Path, destination: Path) -> None:
         source.extractall(destination)
 
 
-def _run_fiji_updater(fiji_path: Path) -> None:
-    launcher = find_fiji_launcher(fiji_path)
+def _run_fiji_updater_command(fiji_path: Path, *arguments: str) -> None:
+    fiji_path = fiji_path.resolve()
+    launcher = next(
+        (
+            candidate
+            for candidate in (
+                fiji_path / "fiji-windows-x64.exe",
+                fiji_path / "fiji.bat",
+                find_fiji_launcher(fiji_path),
+            )
+            if candidate is not None and candidate.is_file()
+        ),
+        None,
+    )
     if launcher is None:
         raise RuntimeError(f"The downloaded Fiji archive has no usable launcher: {fiji_path}")
     launcher_command = [str(launcher)]
     if launcher.suffix.lower() in {".bat", ".cmd"}:
         launcher_command = ["cmd.exe", "/d", "/c", str(launcher)]
-    commands = ([*launcher_command, "--headless", "--update", "update"],)
-    for command in commands:
-        result = subprocess.run(command, cwd=fiji_path, check=False, timeout=1800)
-        if result.returncode != 0:
-            raise RuntimeError(f"Fiji updater failed with exit code {result.returncode}: {' '.join(command)}")
+    command = [*launcher_command, "--headless", "--update", *arguments]
+    result = subprocess.run(command, cwd=fiji_path, check=False, timeout=1800)
+    if result.returncode != 0:
+        raise RuntimeError(f"Fiji updater failed with exit code {result.returncode}: {' '.join(command)}")
+
+
+def _run_fiji_updater(fiji_path: Path) -> None:
+    _run_fiji_updater_command(fiji_path, "update")
+
+
+def _fiji_update_site_enabled(fiji_path: Path, site_name: str) -> bool:
+    database = fiji_path / "db.xml.gz"
+    try:
+        with gzip.open(database, "rb") as stream:
+            root = ElementTree.parse(stream).getroot()
+    except (OSError, ElementTree.ParseError):
+        return False
+    return any(
+        element.tag.rsplit("}", 1)[-1] == "update-site" and element.get("name") == site_name
+        for element in root.iter()
+    )
+
+
+def _install_required_mastodon_dependencies(fiji_path: Path) -> None:
+    """Complete Fiji snapshots whose BIOP loader depends on Mastodon classes."""
+    if not requires_clean_fiji_runtime(fiji_path):
+        return
+    if not _fiji_update_site_enabled(fiji_path, MASTODON_UPDATE_SITE_NAME):
+        _run_fiji_updater_command(
+            fiji_path,
+            "edit-update-site",
+            MASTODON_UPDATE_SITE_NAME,
+            MASTODON_UPDATE_SITE_URL,
+        )
+    _run_fiji_updater_command(fiji_path, "update")
+    if requires_clean_fiji_runtime(fiji_path):
+        class_jars = find_jars_containing_classes(
+            fiji_path,
+            (BIOP_IMAGE_LOADER_SERVICE, MASTODON_PLUGIN_API),
+        )
+        raise RuntimeError(
+            "Fiji's BIOP image loader is still missing its Mastodon dependency after updating: "
+            f"{class_jars}"
+        )
+
+
+def _install_supported_java_runtime(fiji_path: Path, downloads_root: Path) -> Path:
+    """Install the pinned Java 11 runtime required by PyImageJ into Fiji."""
+    destination = fiji_path / "jdk"
+    if is_supported_java_home(destination):
+        return destination
+
+    archive = downloads_root / JAVA_RUNTIME_ARCHIVE_NAME
+    _download_verified_file(JAVA_RUNTIME_URL, archive, JAVA_RUNTIME_SHA256)
+    with tempfile.TemporaryDirectory(prefix="cellonaut-java-", dir=fiji_path.parent) as temp_name:
+        extraction_root = Path(temp_name)
+        _safe_extract_zip(archive, extraction_root)
+        staged = extraction_root / JAVA_RUNTIME_ROOT_NAME
+        if not is_supported_java_home(staged):
+            raise RuntimeError(f"The pinned Java runtime archive is incomplete: {archive}")
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(staged, destination)
+    return destination
 
 
 def _remove_imagescience_from_release_bundle(fiji_path: Path) -> None:
@@ -248,6 +332,8 @@ def prepare_fiji(offline_root: Path, downloads_root: Path) -> Path:
     """Prepare and validate the pinned Fiji bundle for offline redistribution."""
     destination = offline_root / "Fiji.app"
     if destination.exists():
+        _install_required_mastodon_dependencies(destination)
+        _install_supported_java_runtime(destination, downloads_root)
         _remove_imagescience_from_release_bundle(destination)
         _install_pyimagej_bridge(destination, downloads_root)
         if scan_fiji_installation(destination).ready:
@@ -267,6 +353,8 @@ def prepare_fiji(offline_root: Path, downloads_root: Path) -> Path:
             )
         staged = candidates[0]
         _run_fiji_updater(staged)
+        _install_required_mastodon_dependencies(staged)
+        _install_supported_java_runtime(staged, downloads_root)
         _remove_imagescience_from_release_bundle(staged)
         _install_pyimagej_bridge(staged, downloads_root)
         status = scan_fiji_installation(staged)
@@ -299,6 +387,11 @@ def prepare_cellpose_models(offline_root: Path, downloads_root: Path) -> Path:
 def verify_offline_assets(offline_root: Path) -> dict[str, object]:
     """Validate Fiji and model assets and return their release manifest."""
     fiji_path = offline_root / "Fiji.app"
+    if requires_clean_fiji_runtime(fiji_path):
+        raise RuntimeError("Offline Fiji bundle is missing Mastodon dependencies required by its BIOP image loader.")
+    java_home = fiji_path / "jdk"
+    if not is_supported_java_home(java_home):
+        raise RuntimeError("Offline Fiji bundle is missing its supported Java 11 runtime.")
     if find_jar_containing_class(fiji_path, IMAGE_SCIENCE_CLASS) is not None:
         raise RuntimeError("Offline Fiji bundle must not contain separately distributed ImageScience.")
     fiji_status = scan_fiji_installation(fiji_path)
@@ -329,6 +422,7 @@ def verify_offline_assets(offline_root: Path) -> dict[str, object]:
     return {
         "offline": True,
         "fiji": str(fiji_path),
+        "java": {"home": str(java_home), "major_version": java_major_version(java_home)},
         "cellpose_models": models,
     }
 

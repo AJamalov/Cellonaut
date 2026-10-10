@@ -139,7 +139,8 @@ def _distribution_license_files(
 ) -> list[tuple[importlib_metadata.PackagePath, Path]]:
     matches: list[tuple[importlib_metadata.PackagePath, Path]] = []
     for package_path in distribution.files or ():
-        if not package_path.name.lower().startswith(LICENSE_PREFIXES):
+        filename = str(package_path).replace("\\", "/").rsplit("/", 1)[-1]
+        if not filename.lower().startswith(LICENSE_PREFIXES):
             continue
         source = Path(str(distribution.locate_file(package_path)))
         if source.is_file():
@@ -274,7 +275,8 @@ def write_license_inventory(
         for package_path, source in _distribution_license_files(distribution):
             if (
                 canonical_name in QT_OPEN_SOURCE_DISTRIBUTIONS
-                and package_path.name.casefold() == QT_COMMERCIAL_REFERENCE
+                and str(package_path).replace("\\", "/").rsplit("/", 1)[-1].casefold()
+                == QT_COMMERCIAL_REFERENCE
             ):
                 continue
             destination_name = _license_destination_name(package_path)

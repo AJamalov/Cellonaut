@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 
+from cellonaut import __version__
 from cellonaut.release_checks import release_documents
 from cellonaut.release_checks.offline_assets import MODEL_NOTICE
 
@@ -47,24 +48,32 @@ def test_current_release_documents_are_synchronized():
 def test_release_document_validation_detects_version_drift(tmp_path: Path):
     copy_release_documents(tmp_path)
     citation = tmp_path / "CITATION.cff"
-    citation.write_text(citation.read_text(encoding="utf-8").replace("version: 1.0.1", "version: 9.9.9"), encoding="utf-8")
+    citation.write_text(
+        citation.read_text(encoding="utf-8").replace(f"version: {__version__}", "version: 9.9.9"),
+        encoding="utf-8",
+    )
 
     problems = release_documents.validate_release_documents(tmp_path)
 
-    assert "CITATION.cff version does not match 1.0.1" in problems
+    assert f"CITATION.cff version does not match {__version__}" in problems
 
 
 def test_release_document_validation_detects_missing_download_name(tmp_path: Path):
     copy_release_documents(tmp_path)
     readme = tmp_path / "README.md"
     readme.write_text(
-        readme.read_text(encoding="utf-8").replace("Cellonaut-1.0.1-windows.exe", "Cellonaut-windows.exe"),
+        readme.read_text(encoding="utf-8").replace(
+            f"Cellonaut-{__version__}-windows.exe", "Cellonaut-windows.exe"
+        ),
         encoding="utf-8",
     )
 
     problems = release_documents.validate_release_documents(tmp_path)
 
-    assert "README.md does not name release artifact Cellonaut-1.0.1-windows.exe" in problems
+    assert (
+        f"README.md does not name release artifact Cellonaut-{__version__}-windows.exe"
+        in problems
+    )
 
 
 def test_release_document_validation_detects_missing_support_file(tmp_path: Path):
@@ -72,7 +81,7 @@ def test_release_document_validation_detects_missing_support_file(tmp_path: Path
     readme = tmp_path / "README.md"
     readme.write_text(
         readme.read_text(encoding="utf-8").replace(
-            "Cellonaut-1.0.1-windows.sha256",
+            f"Cellonaut-{__version__}-windows.sha256",
             "the Windows checksum manifest",
         ),
         encoding="utf-8",
@@ -82,7 +91,7 @@ def test_release_document_validation_detects_missing_support_file(tmp_path: Path
 
     assert (
         "README.md does not name release support file "
-        "Cellonaut-1.0.1-windows.sha256"
+        f"Cellonaut-{__version__}-windows.sha256"
     ) in problems
 
 
@@ -90,7 +99,8 @@ def test_release_document_validation_rejects_deferred_platform_downloads(tmp_pat
     copy_release_documents(tmp_path)
     readme = tmp_path / "README.md"
     readme.write_text(
-        readme.read_text(encoding="utf-8") + "\nDownload Cellonaut-1.0.1-linux-x86_64-cpu.tar.gz.\n",
+        readme.read_text(encoding="utf-8")
+        + f"\nDownload Cellonaut-{__version__}-linux-x86_64-cpu.tar.gz.\n",
         encoding="utf-8",
     )
 

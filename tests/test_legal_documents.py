@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cellonaut import __version__
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,7 +84,8 @@ def test_source_notice_identifies_release_location_and_copyleft_sources():
     assert "BUNDLED_COMPONENTS.md" in notice
     assert "ImageScience is not" in notice
     assert "redistributed" in notice
-    assert "Cellonaut-1.0.1-corresponding-sources.zip" in notice
+    assert f"Cellonaut-{__version__}-corresponding-sources.zip" in notice
+    assert f"`v{__version__}`" in notice
     assert "corresponding_sources prepare" in notice
     for component in ("Qt", "PySide", "Fiji", "Bio-Formats", "Trainable Weka", "fastremap", "fill-voids"):
         assert component in notice
@@ -93,7 +96,7 @@ def test_bundled_component_inventory_records_versions_sources_and_release_blocke
 
     for component, version in (
         ("Fiji", "2.18.1-SNAPSHOT"),
-        ("Azul Zulu OpenJDK", "21.0.7"),
+        ("Azul Zulu OpenJDK", "11.0.32"),
         ("Bio-Formats", "8.5.0"),
         ("Trainable Weka Segmentation", "4.0.0"),
         ("ImageScience", "Optional; not bundled"),

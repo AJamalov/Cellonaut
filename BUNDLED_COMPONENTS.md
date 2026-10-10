@@ -1,12 +1,12 @@
 # Bundled and Optional Components
 
-Bundled components in the Cellonaut 1.0.1 Windows release:
+Bundled components in the Cellonaut 1.0.2 Windows release:
 
 | Component | Included version | Source and terms |
 | --- | --- | --- |
 | Fiji | 2.18.1-SNAPSHOT; build `c691dc761719086b49a9f927e77d744ae4e5a816`; archive snapshot 20260718-0417 | [Exact source](https://github.com/fiji/fiji/tree/c691dc761719086b49a9f927e77d744ae4e5a816); component-specific licenses. |
 | ImgLib2 Python bridge | `imglib2-imglyb` 1.1.0; `imglib2-unsafe` 1.0.0 | [ImgLyb](https://github.com/imglib/imglib2-imglyb/tree/imglib2-imglyb-1.1.0) and [Unsafe](https://github.com/imglib/imglib2-unsafe/tree/imglib2-unsafe-1.0.0); BSD-2-Clause. |
-| Azul Zulu OpenJDK | Java 21.0.7 | [OpenJDK source](https://www.azul.com/products/core/open-source-projects/); bundled notices apply. |
+| Azul Zulu OpenJDK | Java 11.0.32 | [OpenJDK source](https://www.azul.com/products/core/open-source-projects/); bundled notices apply. |
 | Bio-Formats | 8.5.0; build `877c317e4e396381dc76e56c1539b24947f71dce` | [Exact source](https://github.com/ome/bioformats/tree/877c317e4e396381dc76e56c1539b24947f71dce); GPL-family terms. |
 | Trainable Weka Segmentation | 4.0.0; build `a55f593c08ea3fd94e860a7cd1878f58ed1bff1b` | [Exact source](https://github.com/fiji/Trainable_Segmentation/tree/a55f593c08ea3fd94e860a7cd1878f58ed1bff1b); GPL-3.0. |
 | ImageScience | Optional; not bundled | [Official terms](https://imagescience.org/meijering/software/); release assets must not contain `imagescience.jar`. |

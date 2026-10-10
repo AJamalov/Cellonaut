@@ -28,6 +28,8 @@ def test_verify_offline_assets_requires_every_model(tmp_path: Path, monkeypatch)
     )
     monkeypatch.setattr(offline_assets, "MINIMUM_MODEL_BYTES", 1)
     monkeypatch.setattr(offline_assets, "PYIMAGEJ_BRIDGE_ARTIFACTS", {})
+    monkeypatch.setattr(offline_assets, "is_supported_java_home", lambda _path: True)
+    monkeypatch.setattr(offline_assets, "java_major_version", lambda _path: 11)
     for name in offline_assets.CELLPOSE_MODEL_NAMES[:-1]:
         (models / name).write_bytes(name.encode("ascii"))
 
@@ -58,6 +60,7 @@ def test_verify_offline_assets_rejects_removed_dino_models(tmp_path: Path, monke
     )
     monkeypatch.setattr(offline_assets, "MINIMUM_MODEL_BYTES", 1)
     monkeypatch.setattr(offline_assets, "PYIMAGEJ_BRIDGE_ARTIFACTS", {})
+    monkeypatch.setattr(offline_assets, "is_supported_java_home", lambda _path: True)
 
     with pytest.raises(RuntimeError, match="must not be included"):
         offline_assets.verify_offline_assets(offline_root)
@@ -176,6 +179,47 @@ def test_install_pyimagej_bridge_reuses_verified_local_maven_cache(tmp_path: Pat
     assert download_calls == [downloads / filename]
 
 
+def test_install_supported_java_runtime_extracts_verified_archive(tmp_path: Path, monkeypatch):
+    fiji_path = tmp_path / "Fiji.app"
+    downloads = tmp_path / "downloads"
+    archive = downloads / offline_assets.JAVA_RUNTIME_ARCHIVE_NAME
+    archive.parent.mkdir(parents=True)
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr(f"{offline_assets.JAVA_RUNTIME_ROOT_NAME}/bin/java.exe", b"java")
+        output.writestr(f"{offline_assets.JAVA_RUNTIME_ROOT_NAME}/bin/server/jvm.dll", b"jvm")
+    monkeypatch.setattr(offline_assets, "_download_verified_file", lambda *_args: None)
+    monkeypatch.setattr(
+        offline_assets,
+        "is_supported_java_home",
+        lambda path: (path / "bin" / "java.exe").is_file() and (path / "bin" / "server" / "jvm.dll").is_file(),
+    )
+
+    installed = offline_assets._install_supported_java_runtime(fiji_path, downloads)
+
+    assert installed == fiji_path / "jdk"
+    assert (installed / "bin" / "java.exe").read_bytes() == b"java"
+    assert (installed / "bin" / "server" / "jvm.dll").read_bytes() == b"jvm"
+
+
+def test_install_required_mastodon_dependencies_updates_partial_fiji(tmp_path: Path, monkeypatch):
+    fiji_path = tmp_path / "Fiji.app"
+    checks = iter((True, False))
+    commands = []
+    monkeypatch.setattr(offline_assets, "requires_clean_fiji_runtime", lambda _path: next(checks))
+    monkeypatch.setattr(
+        offline_assets,
+        "_run_fiji_updater_command",
+        lambda _path, *arguments: commands.append(arguments),
+    )
+
+    offline_assets._install_required_mastodon_dependencies(fiji_path)
+
+    assert commands == [
+        ("edit-update-site", offline_assets.MASTODON_UPDATE_SITE_NAME, offline_assets.MASTODON_UPDATE_SITE_URL),
+        ("update",),
+    ]
+
+
 @pytest.mark.parametrize("folder_name", ["Fiji", "Fiji.app"])
 def test_prepare_fiji_accepts_official_archive_folder_names(
     tmp_path: Path, monkeypatch, folder_name: str
@@ -194,6 +238,8 @@ def test_prepare_fiji_accepts_official_archive_folder_names(
         lambda: "https://example.invalid/fiji-latest-win64-jdk.zip",
     )
     monkeypatch.setattr(offline_assets, "_run_fiji_updater", lambda _path: None)
+    monkeypatch.setattr(offline_assets, "_install_required_mastodon_dependencies", lambda _path: None)
+    monkeypatch.setattr(offline_assets, "_install_supported_java_runtime", lambda *_args: None)
     monkeypatch.setattr(offline_assets, "_install_pyimagej_bridge", lambda *_args: None)
     monkeypatch.setattr(
         offline_assets,
