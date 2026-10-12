@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from importlib.metadata import Distribution, PackagePath
 from pathlib import Path
-from importlib.metadata import PackagePath
+from typing import cast
 
 import pytest
 
@@ -32,16 +33,17 @@ def test_license_discovery_accepts_windows_separators_in_wheel_records(tmp_path,
     license_path.parent.mkdir()
     license_path.write_text("license text\n", encoding="utf-8")
 
-    class Distribution:
+    class FakeDistribution:
         files = [PackagePath(r"package.dist-info\LICENSE")]
 
         @staticmethod
         def locate_file(_package_path):
             return license_path
 
-    matches = license_inventory._distribution_license_files(Distribution())
+    distribution = cast(Distribution, FakeDistribution())
+    matches = license_inventory._distribution_license_files(distribution)
 
-    assert matches == [(Distribution.files[0], license_path)]
+    assert matches == [(FakeDistribution.files[0], license_path)]
 
 
 def test_license_inventory_collects_dependency_and_python_licenses(tmp_path, monkeypatch):
